@@ -8,6 +8,9 @@ import json
 import argparse
 import traceback
 import contextlib
+import threading
+import concurrent.futures
+import time
 from typing import List, Dict, Any
 import openpyxl
 from openpyxl.cell import Cell
@@ -26,16 +29,28 @@ Câu hỏi có thể bằng tiếng Anh, tiếng Việt, tiếng Pháp hoặc ng
 
 QUY TẮC BẮT BUỘC (CHAIN OF THOUGHT):
 1. Suy nghĩ ngắn gọn trong thẻ <THOUGHT>...</THOUGHT>.
-2. Nếu bảng nhỏ và bạn đã thấy rõ đáp án chính xác 100% trên bảng xem trước (Overview), hãy xuất ngay <FINAL_ANSWER> mà không cần gọi tool.
-3. Nếu cần gọi tool `run_python_analysis`, BẠN PHẢI TUÂN THỦ CÁC NGUYÊN TẮC PANDAS SAU ĐỂ TRÁNH LỖI:
-   - KHÔNG BAO GIỜ đoán tên cột. Tên cột do hàm `load_df()` tạo ra có thể rất dài và phức tạp do gộp dòng. Bạn PHẢI in `df.columns.tolist()` để xem tên cột chính xác trước khi truy xuất, HOẶC ưu tiên sử dụng chỉ mục cột `df.iloc[:, index]`.
-   - Dữ liệu có thể chứa chuỗi (string), khoảng trắng, hoặc NaN. Khi cần tính toán toán học, luôn dùng `pd.to_numeric(df[col], errors='coerce')` để ép kiểu an toàn thay vì dùng `.astype(float)`.
-   - Luôn kiểm tra `.head()` hoặc in một vài dòng dữ liệu trước khi thực hiện các phép lọc phức tạp. Nếu code báo lỗi, hãy dùng <THOUGHT> phân tích log lỗi để sửa lại code chứ không lặp lại code cũ.
-   - Các biến/hàm có sẵn: `pd`, `openpyxl`, `file_path`, `sheet_names`, `sheets_raw`, và hàm `load_df(sheet_name=None, header_rows=1)`.
-   - BẮT BUỘC dùng `print()` để in kết quả tính toán ra màn hình.
-4. CẢNH BÁO SUY LUẬN DỮ LIỆU (QUAN TRỌNG ĐỂ ĐẠT EXACT MATCH):
-   - TRÁNH BẪY DÒNG "TỔNG": Các bảng thống kê thực tế thường chứa các dòng "Total", "Subtotal", "All industries", "16 years and over", v.v. Khi yêu cầu tính trung bình (Mean), đếm (Count), hoặc tính tổng các nhóm, BẠN BẮT BUỘC PHẢI LOẠI BỎ các dòng tổng quát này ra khỏi DataFrame để tránh làm sai lệch kết quả.
-   - GIỮ NGUYÊN GIÁ TRỊ GỐC: Nếu tiêu đề bảng có ghi chú đơn vị (ví dụ: "[In thousands]", "[In millions]"), TUYỆT ĐỐI KHÔNG tự ý nhân thêm 1000 hay 1000000 vào kết quả cuối cùng. Hãy trả về con số y hệt như nó hiển thị trong ô dữ liệu gốc (ví dụ: nếu ô ghi 34282 thì đáp án là 34282, KHÔNG PHẢI 34282000).
+2. Nếu bảng nhỏ và bạn đã thấy rõ đáp án chính xác trên bảng xem trước (Overview), hãy xuất ngay <FINAL_ANSWER>.
+3. Nếu cần chạy Python tool, hãy SỬ DỤNG CÁC HÀM TRỢ THỦ SAU đây thay vì tự viết logic pandas phức tạp để tránh lỗi:
+   - `df = load_df()`: Lấy DataFrame an toàn (đã tự động gộp header).
+   - `find_row(df, "keyword")`: Trả về Index (số dòng) của dòng đầu tiên chứa keyword (không phân biệt hoa/thường). Trả về -1 nếu không thấy.
+   - `find_col(df, "keyword")`: Trả về tên cột chứa keyword. Trả về None nếu không thấy.
+   - `get_val(df, row_idx, col_name_or_idx)`: Lấy giá trị an toàn tại dòng/cột.
+   - Ví dụ an toàn: 
+     ```python
+     df = load_df()
+     r = find_row(df, "Mexican")
+     c = find_col(df, "2023")
+     if r != -1 and c:
+         print(get_val(df, r, c))
+     ```
+   - NẾU TỰ VIẾT PANDAS: 
+     - KHÔNG BAO GIỜ dùng `.loc['Tên dòng']` hoặc `df['Tên cột đầy đủ']` vì tên cột do gộp ô rất dài và có ký tự ẩn. LUÔN in `df.columns.tolist()` để kiểm tra, hoặc ưu tiên dùng `.iloc[row_idx, col_idx]`.
+     - KHÔNG dùng `.astype(float)`. Luôn dùng `pd.to_numeric(df[col], errors='coerce')` khi ép kiểu toán học.
+     - Luôn in kết quả ra màn hình bằng lệnh `print()`. Nếu code báo lỗi, hãy đọc log lỗi để sửa lại code chứ không lặp lại.
+4. CẢNH BÁO QUAN TRỌNG VỀ SUY LUẬN DỮ LIỆU ĐỂ ĐẠT EXACT MATCH:
+   - QUY TẮC TÍNH TRUNG BÌNH/TỔNG: Theo quy ước BTC, nếu câu hỏi yêu cầu tính trung bình/tổng "across all..." (ví dụ: across all education levels) mà KHÔNG yêu cầu loại trừ, bạn BẮT BUỘC PHẢI TÍNH TRÊN TOÀN BỘ CÁC CỘT (BAO GỒM CẢ CỘT "TOTAL"). Không tự ý loại bỏ dòng/cột Total trong trường hợp này.
+   - QUY TẮC TÍNH TUỔI: Nếu bảng có cột `Date of Birth` và `Date of Admission`, thuật ngữ "youngest/oldest" (trẻ nhất/già nhất) ngầm định là tính tại thời điểm nhập học. Hãy tính tuổi bằng cách lấy `Date of Admission` trừ đi `Date of Birth` (Tuổi nhập học thấp = Trẻ nhất).
+   - GIỮ NGUYÊN GIÁ TRỊ GỐC: Nếu tiêu đề bảng có ghi chú đơn vị (ví dụ: "[In thousands]", "[In millions]"), TUYỆT ĐỐI KHÔNG tự ý nhân thêm 1000 hay 1000000. Trả về con số y hệt như nó hiển thị trong ô.
 5. Khi đã có kết quả cuối cùng, đặt ĐÁP ÁN DUY NHẤT vào thẻ <FINAL_ANSWER>...</FINAL_ANSWER>:
    - Chỉ ghi đáp án, tuyệt đối không kèm lời giải thích hay đơn vị thừa.
    - Tuân thủ chính xác số chữ số thập phân được yêu cầu (ví dụ: `50.0`, `14.20`, `40.60, 37.60`). Nếu câu hỏi có yêu cầu định dạng thập phân, bạn PHẢI bảo toàn các số 0 ở cuối.
@@ -52,7 +67,7 @@ TOOLS_SCHEMA = [
                 "properties": {
                     "python_code": {
                         "type": "string",
-                        "description": "Code Python cần thực thi. Có sẵn `pd`, `sheet_names`, `sheets_raw`, và hàm `load_df(sheet_name=None, header_rows=1)`."
+                        "description": "Code Python cần thực thi. Có sẵn các biến: `pd`, `sheet_names`, `sheets_raw` và các hàm trợ thủ `load_df()`, `find_row(df, kw)`, `find_col(df, kw)`, `get_val(df, r, c)`."
                     }
                 },
                 "required": ["python_code"],
@@ -251,6 +266,31 @@ class ExcelWorkspace:
 
     def run_python(self, code: str) -> str:
         buf = io.StringIO()
+
+        # --- Các hàm trợ thủ an toàn (Helper Functions) ---
+        def helper_find_row(df, keyword):
+            kw = str(keyword).lower().strip()
+            for idx, row in df.iterrows():
+                if any(kw in str(val).lower() for val in row.values if pd.notna(val)):
+                    return idx
+            return -1
+
+        def helper_find_col(df, keyword):
+            kw = str(keyword).lower().strip()
+            for col in df.columns:
+                if kw in str(col).lower():
+                    return col
+            return None
+
+        def helper_get_val(df, row_idx, col):
+            try:
+                if isinstance(col, int):
+                    return df.iloc[row_idx, col]
+                return df.loc[row_idx, col]
+            except Exception:
+                return None
+        # --------------------------------------------------
+
         exec_globals = {
             "__builtins__": __builtins__,
             "pd": pd,
@@ -260,7 +300,11 @@ class ExcelWorkspace:
             "sheets_raw": self.sheets_raw,
             "load_df": self.load_df,
             "load_unmerged_df": self.load_df,
+            "find_row": helper_find_row,
+            "find_col": helper_find_col,
+            "get_val": helper_get_val,
         }
+
         try:
             with contextlib.redirect_stdout(buf):
                 exec(code, exec_globals)
@@ -419,16 +463,22 @@ class QuerySolver:
             base_url=base_url, api_key=api_key, timeout=60.0, max_retries=3)
         self.model = model
         self.workspaces: Dict[str, ExcelWorkspace] = {}
+        # Thread-lock cho bộ nhớ đệm (Cache) để an toàn khi nhiều luồng truy cập RAM
+        self._ws_lock = threading.Lock()
 
     def get_workspace(self, xlsx_dir: str, file_name: str) -> ExcelWorkspace:
         key = f"{xlsx_dir}::{file_name}"
-        if key not in self.workspaces:
-            if len(self.workspaces) >= 5:
-                del self.workspaces[next(iter(self.workspaces.keys()))]
-            self.workspaces[key] = ExcelWorkspace(xlsx_dir, file_name)
-        return self.workspaces[key]
+        with self._ws_lock:
+            if key not in self.workspaces:
+                if len(self.workspaces) >= 5:
+                    del self.workspaces[next(iter(self.workspaces.keys()))]
+                self.workspaces[key] = ExcelWorkspace(xlsx_dir, file_name)
+            return self.workspaces[key]
 
-    def process_query(self, q_id: Any, xlsx_dir: str, file_name: str, query: str) -> Dict[str, Any]:
+    def process_query(self, q_id: Any, xlsx_dir: str, file_name: str, query: str, log_cb=None) -> Dict[str, Any]:
+        if log_cb is None:
+            def log_cb(msg): return print(msg, file=sys.stderr)
+
         ws = self.get_workspace(xlsx_dir, file_name)
         overview = ws.get_overview()
 
@@ -461,12 +511,12 @@ class QuerySolver:
                 step_cost = (p_tok / 1_000_000 * PRICE_1M_PROMPT) + \
                     (c_tok / 1_000_000 * PRICE_1M_COMPLETION)
                 total_cost += step_cost
-                print(
-                    f"  [Step {step+1}] Tokens: Prompt={p_tok}, Comp={c_tok} | Chi phí: ${step_cost:.6f}", file=sys.stderr)
+                log_cb(
+                    f"  [Step {step+1}] Tokens: Prompt={p_tok}, Comp={c_tok} | Chi phí: ${step_cost:.6f}")
 
             if msg.content:
                 for t in re.findall(r"<THOUGHT>(.*?)</THOUGHT>", msg.content, re.DOTALL | re.IGNORECASE):
-                    print(f"  [THOUGHT]: {t.strip()[:250]}", file=sys.stderr)
+                    log_cb(f"  [THOUGHT]: {t.strip()[:250]}")
 
             if msg.tool_calls:
                 messages.append({
@@ -492,7 +542,7 @@ class QuerySolver:
                     except Exception:
                         t_args = {}
 
-                    print(f"  [CALL]: {t_name}", file=sys.stderr)
+                    log_cb(f"  [CALL]: {t_name}")
                     if t_name == "run_python_analysis":
                         tool_out = ws.run_python(t_args.get("python_code", ""))
                     elif t_name == "read_sheet_grid":
@@ -504,8 +554,7 @@ class QuerySolver:
                     else:
                         tool_out = f"Tool '{t_name}' không tồn tại."
 
-                    print(
-                        f"  [OUTPUT]: {tool_out.strip()[:250]}", file=sys.stderr)
+                    log_cb(f"  [OUTPUT]: {str(tool_out).strip()[:250]}")
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -540,6 +589,8 @@ class QuerySolver:
 
 
 def main():
+    start_time = time.time()  # Bắt đầu đếm giờ tổng thời gian xử lý
+
     parser = argparse.ArgumentParser(
         description="AI26C0084 - Giải pháp Hỏi đáp trên Bảng tính Excel")
     parser.add_argument("--xlsx-dir", type=str, default="input",
@@ -573,38 +624,76 @@ def main():
     total_cost = 0.0
     total_tokens = 0
 
-    for item in queries_list:
+    # Khóa luồng (Lock) cho việc in ra màn hình
+    print_lock = threading.Lock()
+
+    # Hàm xử lý từng câu hỏi cho luồng (thread)
+    def process_item(item):
         q_id = item.get("id")
         file_name = item.get("file_name") or item.get("file name")
         query_text = item.get("query", "")
 
-        print(
-            f"\n{'='*50}\n>>> Đang xử lý ID: {q_id} | File: {file_name}", file=sys.stderr)
+        # Buffer: Lưu tạm toàn bộ dòng log của ID này vào một list
+        logs_buffer = []
+        logs_buffer.append(
+            f"\n{'='*55}\n>>> Đang xử lý ID: {q_id} | File: {file_name}")
+
         try:
+            # Truyền logs_buffer.append vào log_cb để Gom log thay vì In trực tiếp
             res = solver.process_query(
-                q_id, args.xlsx_dir, file_name, query_text)
+                q_id, args.xlsx_dir, file_name, query_text, log_cb=logs_buffer.append)
+
             answer = res["answer"]
-            total_cost += res["cost"]
-            total_tokens += res["tokens"]
-            print(
-                f"[THỐNG KÊ ID {q_id}] Chi phí: ${res['cost']:.6f} | Tokens: {res['tokens']}", file=sys.stderr)
+            cost = res["cost"]
+            tokens = res["tokens"]
+
+            logs_buffer.append(
+                f"[THỐNG KÊ ID {q_id}] Chi phí: ${cost:.6f} | Tokens: {tokens}")
+            logs_buffer.append(f"<<< ĐÁP ÁN ID {q_id}: {answer}")
+
+            # Xuất log ra màn hình: Đợi lấy khóa lock xong mới in "một cục" ra console
+            with print_lock:
+                print("\n".join(logs_buffer), file=sys.stderr, flush=True)
+
+            return {"id": q_id, "answer": answer, "cost": cost, "tokens": tokens}
         except Exception as e:
-            print(f"[LỖI ID {q_id}]: {str(e)}", file=sys.stderr)
-            answer = ""
+            logs_buffer.append(f"[LỖI ID {q_id}]: {str(e)}")
+            with print_lock:
+                print("\n".join(logs_buffer), file=sys.stderr, flush=True)
 
-        print(f"<<< ĐÁP ÁN ID {q_id}: {answer}", file=sys.stderr)
-        results.append({"id": q_id, "answer": answer})
+            return {"id": q_id, "answer": "", "cost": 0.0, "tokens": 0}
 
+    # Giới hạn 3 luồng chạy song song để đảm bảo không bị tràn RAM của BTC
+    max_workers = 3
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(process_item, item)
+                   for item in queries_list]
+
+        for future in concurrent.futures.as_completed(futures):
+            res_data = future.result()
+            results.append(
+                {"id": res_data["id"], "answer": res_data["answer"]})
+            total_cost += res_data["cost"]
+            total_tokens += res_data["tokens"]
+
+    # Sắp xếp lại thứ tự theo id tăng dần theo quy định BTC
+    try:
+        results = sorted(results, key=lambda x: int(x["id"]))
+    except ValueError:
+        results = sorted(results, key=lambda x: str(x["id"]))
+
+    # Ghi file kết quả chuẩn CSV
     with open(args.output, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=["id", "answer"])
         writer.writeheader()
         writer.writerows(results)
 
-    json_output_path = os.path.join(out_dir, "answers.json")
-    with open(json_output_path, "w", encoding="utf-8") as jsonfile:
-        json.dump(results, jsonfile, ensure_ascii=False, indent=2)
+    # Kết thúc đếm giờ và định dạng thời gian
+    elapsed_time = time.time() - start_time
+    mins = int(elapsed_time // 60)
+    secs = elapsed_time % 60
 
-    print(f"\n{'='*50}\nHOÀN TẤT! Đã xử lý: {len(results)} câu | Tổng Token: {total_tokens} | Tổng Chi phí: ${total_cost:.6f}\n{'='*50}", file=sys.stderr)
+    print(f"\n{'='*55}\nHOÀN TẤT! Đã xử lý: {len(results)} câu | Thời gian: {mins}p {secs:.2f}s | Tổng Token: {total_tokens} | Tổng Chi phí: ${total_cost:.6f}\n{'='*55}", file=sys.stderr)
 
 
 if __name__ == "__main__":
