@@ -20,7 +20,7 @@ python main.py \
  --output /output/submission.csv \
  --openrouter-key <YOUR_OPENROUTER_KEY> \
  --openrouter-model qwen/qwen3.7-flash \
- --openrouter-base-url [https://openrouter.ai/api/v1](https://openrouter.ai/api/v1)
+ --openrouter-base-url https://openrouter.ai/api/v1
 ```
 
 ## 4. Đóng gói và chạy qua Docker
@@ -38,14 +38,5 @@ docker run --rm \
   --output /output/submission.csv \
   --openrouter-key <YOUR_OPENROUTER_KEY> \
   --openrouter-model qwen/qwen3.7-flash \
-  --openrouter-base-url [https://openrouter.ai/api/v1](https://openrouter.ai/api/v1)
-```
-
-### 5. Lưu ý quan trọng khi nén file `.zip` nộp bài (`AI26C0084.zip`)
-
-Theo mục 1 của tài liệu **Hướng dẫn nộp bài Bảng C**, `Dockerfile` bắt buộc phải nằm ngay ở gốc của tệp `.zip`, không được nằm trong thư mục con `AI26C0084/Dockerfile`[cite: 6]. Khi nén bài nộp, bạn hãy đứng **bên trong** thư mục `AI26C0084` và chỉ nén các file cần thiết:
-
-```bash
-# Đứng tại thư mục AI26C0084/
-zip -r AI26C0084.zip Dockerfile main.py requirements.txt README.md helper/excel_mcp_server.py
+  --openrouter-base-url https://openrouter.ai/api/v1
 ```
