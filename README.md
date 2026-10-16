@@ -23,6 +23,26 @@ python main.py \
  --openrouter-base-url https://openrouter.ai/api/v1
 ```
 
+```pwsh
+python main.py `
+  --xlsx-dir /input/xlsx_files `
+  --queries /input/queries.json `
+  --output /output/submission.csv `
+  --openrouter-key <YOUR_OPENROUTER_KEY> `
+  --openrouter-model qwen/qwen3.7-flash `
+  --openrouter-base-url https://openrouter.ai/api/v1
+```
+
+```cmd
+python main.py ^
+  --xlsx-dir /input/xlsx_files ^
+  --queries /input/queries.json ^
+  --output /output/submission.csv ^
+  --openrouter-key <YOUR_OPENROUTER_KEY> ^
+  --openrouter-model qwen/qwen3.7-flash ^
+  --openrouter-base-url https://openrouter.ai/api/v1
+```
+
 ## 4. Đóng gói và chạy qua Docker
 
 ```bash
