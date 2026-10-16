@@ -1,0 +1,37 @@
+[
+    {
+        "id": "ext_q001",
+        "file_name": "p2_t03.xlsx",
+        "query": "In which year did the civilian labor force first cross the 70,000 mark (in thousands)? Answer with only the year as an integer."
+    },
+    {
+        "id": "ext_q002",
+        "file_name": "p2_t03.xlsx",
+        "query": "En qué año el número de personas desempleadas (en miles) superó por primera vez los 4,000? Responde únicamente con el año, expresado en dos decimales."
+    },
+    {
+        "id": "ext_q003",
+        "file_name": "p2_t07.xlsx",
+        "query": "Für die Branche 'Support activities for agriculture and forestry', wie hoch ist die Total recordable cases Inzidenzrate? Answer with only the number with two decimal places."
+    },
+    {
+        "id": "ext_q004",
+        "file_name": "p2_t09.xlsx",
+        "query": "Quel est le montant total des actifs (Total assets) au 31 juillet 2014, en millions de dollars ? Répondez avec un nombre entier, sans virgules ni unités."
+    },
+    {
+        "id": "ext_q005",
+        "file_name": "p2_t11.xlsx",
+        "query": "Trong bảng khảo sát dịch vụ y tế, tỷ lệ trung bình của những người đã được đáp ứng hoàn toàn (fully met) nhu cầu chăm sóc ở mức khoảng bao nhiêu phần trăm? Trả lời với đúng hai chữ số thập phân (decimal places)."
+    },
+    {
+        "id": "ext_q006",
+        "file_name": "p2_t03.xlsx",
+        "query": "고용된 전체 노동자 수(Total employed)가 6만(60,000천 명)을 처음으로 넘은 연도는 언제입니까? 오직 연도만 정수로 답하십시오."
+    },
+    {
+        "id": "ext_q007",
+        "file_name": "p2_t07.xlsx",
+        "query": "在金属阀门制造业（Metal valve manufacturing）中，Total recordable cases 的发生率是多少？请保留两位小数回答。"
+    }
+]
