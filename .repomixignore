@@ -1,0 +1,33 @@
+# Bỏ qua toàn bộ lịch sử và cấu hình Git (nguyên nhân chính gây tốn token)
+.git/
+**/.git/**
+.gitignore
+**/.gitkeep
+
+# Bỏ qua môi trường ảo và cấu hình local
+venv/
+.venv/
+env/
+.env
+*.bat
+*.ps1
+
+# Bỏ qua dữ liệu Excel mẫu, kết quả xuất ra và file nén
+excel_input/
+submission_output/
+xlsx_files/
+*.xlsx
+*.xls
+*.csv
+*.zip
+*.pdf
+queries.json
+answers.json
+sample_submission.csv
+
+# Bỏ qua các file test nháp không nằm trong luồng chạy chính
+helper/mcp_test.py
+helper/test.py
+
+# Bỏ qua chính file xuất ra của repomix
+repomix-output.*
