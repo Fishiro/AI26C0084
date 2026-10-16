@@ -674,9 +674,7 @@ def main():
             # 1. CẬP NHẬT: Lưu thêm cost và tokens vào mảng kết quả chung để xuất ra JSON dự phòng
             results.append({
                 "id": res_data["id"],
-                "answer": res_data["answer"],
-                "cost": res_data["cost"],
-                "tokens": res_data["tokens"]
+                "answer": res_data["answer"]
             })
             total_cost += res_data["cost"]
             total_tokens += res_data["tokens"]
@@ -717,9 +715,9 @@ def main():
     print(
         f"Tổng Token: {total_tokens} | Tổng Chi phí: ${total_cost:.6f}", file=sys.stderr)
     print(
-        f"-> File nộp thi (chỉ 2 cột) : {os.path.abspath(args.output)}", file=sys.stderr)
+        f"-> File submission.csv : {os.path.abspath(args.output)}", file=sys.stderr)
     print(
-        f"-> File dự phòng (đầy đủ)  : {os.path.abspath(answers_json_path)}", file=sys.stderr)
+        f"-> File answers.json  : {os.path.abspath(answers_json_path)}", file=sys.stderr)
     print(f"{'='*55}\n", file=sys.stderr)
 
 
