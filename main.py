@@ -671,8 +671,13 @@ def main():
 
         for future in concurrent.futures.as_completed(futures):
             res_data = future.result()
-            results.append(
-                {"id": res_data["id"], "answer": res_data["answer"]})
+            # 1. CẬP NHẬT: Lưu thêm cost và tokens vào mảng kết quả chung để xuất ra JSON dự phòng
+            results.append({
+                "id": res_data["id"],
+                "answer": res_data["answer"],
+                "cost": res_data["cost"],
+                "tokens": res_data["tokens"]
+            })
             total_cost += res_data["cost"]
             total_tokens += res_data["tokens"]
 
@@ -682,18 +687,40 @@ def main():
     except ValueError:
         results = sorted(results, key=lambda x: str(x["id"]))
 
-    # Ghi file kết quả chuẩn CSV
+    # 2. GHI FILE SUBMISSION.CSV CHUẨN ĐỂ NỘP BÀI
+    # Lọc lại chỉ lấy 2 cột id và answer để ghi vào CSV (Bắt buộc theo luật BTC)
+    csv_data = [{"id": r["id"], "answer": r["answer"]} for r in results]
     with open(args.output, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=["id", "answer"])
         writer.writeheader()
-        writer.writerows(results)
+        writer.writerows(csv_data)
+
+    # 3. GHI FILE ANSWERS.JSON DỰ PHÒNG
+    # Đặt file json đồng cấp (cùng thư mục) với tệp submission.csv
+    answers_json_path = os.path.join(
+        out_dir, "answers.json") if out_dir else "answers.json"
+    try:
+        with open(answers_json_path, "w", encoding="utf-8") as jsonfile:
+            # Ghi toàn bộ dữ liệu (id, answer, cost, tokens) vào file JSON
+            json.dump(results, jsonfile, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Lỗi khi lưu tệp {answers_json_path}: {e}", file=sys.stderr)
 
     # Kết thúc đếm giờ và định dạng thời gian
     elapsed_time = time.time() - start_time
     mins = int(elapsed_time // 60)
     secs = elapsed_time % 60
 
-    print(f"\n{'='*55}\nHOÀN TẤT! Đã xử lý: {len(results)} câu | Thời gian: {mins}p {secs:.2f}s | Tổng Token: {total_tokens} | Tổng Chi phí: ${total_cost:.6f}\n{'='*55}", file=sys.stderr)
+    print(f"\n{'='*55}", file=sys.stderr)
+    print(
+        f"HOÀN TẤT! Đã xử lý: {len(results)} câu | Thời gian: {mins}p {secs:.2f}s", file=sys.stderr)
+    print(
+        f"Tổng Token: {total_tokens} | Tổng Chi phí: ${total_cost:.6f}", file=sys.stderr)
+    print(
+        f"-> File nộp thi (chỉ 2 cột) : {os.path.abspath(args.output)}", file=sys.stderr)
+    print(
+        f"-> File dự phòng (đầy đủ)  : {os.path.abspath(answers_json_path)}", file=sys.stderr)
+    print(f"{'='*55}\n", file=sys.stderr)
 
 
 if __name__ == "__main__":
