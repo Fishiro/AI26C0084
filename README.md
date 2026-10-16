@@ -108,34 +108,34 @@ Các tham số trên đã tương thích với giao diện CLI được triển 
 
 ## Kiến trúc và phương pháp xử lý
 
-Giải pháp được tổ chức tập trung trong `main.py`, hướng đến giảm chi phí xử lý dữ liệu Excel, hạn chế sử dụng bộ nhớ và chuẩn hóa câu trả lời trước khi xuất kết quả.
+Giải pháp được thiết kế gói gọn trong `main.py`, kết hợp giữa tiền xử lý bảng tính trên RAM, vòng lặp suy luận với công cụ (Tool Calling) và bộ chuẩn hóa đầu ra bằng biểu thức chính quy (Regex)[cite: 1].
 
-### ExcelWorkspace - Xử lý bảng tính trong bộ nhớ
+### 1. ExcelWorkspace - Tiền xử lý và lưu đệm bảng tính trên RAM
 
-- Sử dụng `openpyxl` và `pandas` để đọc và xử lý dữ liệu Excel.
-- Hỗ trợ xử lý ô gộp (`merged_cells`) bằng cách điền giá trị vào các ô liên quan trong bộ nhớ.
-- Tái sử dụng dữ liệu và cấu trúc bảng tính đã nạp khi xử lý nhiều câu hỏi trên cùng dữ liệu.
-- Hỗ trợ nhận diện tiêu đề nhiều tầng (`multi-row headers`) thông qua `load_df()`.
-- Cung cấp thông tin về các trang tính để hỗ trợ truy vấn trên nhiều sheet.
+- **Đọc và làm phẳng ô gộp (`merged_cells`):** Sử dụng `openpyxl` (`data_only=True`) để lấy giá trị thực của ô thay vì công thức[cite: 1]. Tự động tách toàn bộ các vùng ô gộp và điền lặp lại giá trị của ô gốc (top-left) vào tất cả các ô thành phần nhằm bảo toàn ngữ cảnh dòng/cột[cite: 1].
+- **Tạo bảng xem trước (`get_overview`):** Trích xuất tối đa 35 dòng và 20 cột đầu tiên của mỗi trang tính dưới dạng bảng Markdown có gắn tọa độ dòng (`R1(0)`) và cột (`C1(A)`)[cite: 1]. Với các bảng dữ liệu nhỏ, mô hình có thể trả lời trực tiếp ngay từ bước xem trước mà không cần gọi thêm công cụ[cite: 1].
+- **Chuẩn hóa DataFrame (`load_df`):** Tự động loại bỏ các dòng/cột trống hoàn toàn, nhận diện và gộp tiêu đề nhiều tầng (`multi-row headers`) thành tên cột hoàn chỉnh (kèm tên cột rút gọn nếu không trùng lặp), đồng thời tự động ép kiểu số (`pd.to_numeric`) cho các cột dữ liệu[cite: 1].
 
-### QuerySolver - Vòng lặp gọi công cụ phân tích
+### 2. QuerySolver - Vòng lặp suy luận và thực thi công cụ
 
-- Kết nối mô hình Qwen thông qua OpenRouter API.
-- Sử dụng `temperature=0.0` theo cấu hình mô hình để hướng đến kết quả nhất quán.
-- Có thể tạo và thực thi mã Python/Pandas thông qua `run_python_analysis` để phân tích dữ liệu có cấu trúc.
-- Hỗ trợ đọc lưới ô bằng `read_sheet_grid` khi cần xác định vị trí hoặc quan hệ giữa các ô.
-- Phối hợp giữa suy luận của LLM và thao tác trên dữ liệu bảng tính để tìm câu trả lời.
+- **Cơ chế bộ nhớ đệm an toàn luồng (Thread-safe Cache):** Lưu giữ tối đa 5 đối tượng `ExcelWorkspace` gần nhất trên RAM và đồng bộ hóa truy cập bằng `threading.Lock`, giúp tái sử dụng dữ liệu khi có nhiều câu hỏi cùng truy vấn trên một tệp Excel[cite: 1].
+- **Vòng lặp Agent (tối đa 6 bước):** Kết nối với mô hình ngôn ngữ (mặc định `qwen/qwen3.7-flash`) qua OpenRouter API với `temperature=0.0`[cite: 1]. Mô hình suy luận từng bước trong thẻ `<THOUGHT>` và chủ động lựa chọn gọi công cụ trước khi đưa ra đáp án trong thẻ `<FINAL_ANSWER>`[cite: 1].
+- **Hệ thống công cụ và hàm trợ thủ an toàn:**
+    - `read_sheet_grid`: Đọc chi tiết một vùng dòng/cột cụ thể trên sheet khi bảng vượt quá phạm vi xem trước[cite: 1].
+    - `run_python_analysis`: Thực thi mã Python/Pandas trực tiếp trên dữ liệu trong bộ nhớ và thu nhận kết quả qua `stdout`[cite: 1]. Cung cấp sẵn các hàm trợ thủ (`load_df`, `find_row`, `find_col`, `get_val`) giúp tìm kiếm dòng/cột theo từ khóa không phân biệt hoa thường, hạn chế lỗi sai lệch tên cột do ký tự ẩn hoặc tiêu đề gộp quá dài[cite: 1].
+- **Quy tắc suy luận miền dữ liệu (Domain Rules):** Tích hợp chỉ dẫn trực tiếp trong System Prompt để xử lý các trường hợp dễ mất điểm Exact Match như: giữ nguyên cột `Total` khi đề bài yêu cầu tính trên toàn bộ các nhóm (`across all...`), tính tuổi dựa trên khoảng cách giữa `Date of Admission` và `Date of Birth`, và giữ nguyên giá trị số gốc trên ô mà không tự ý nhân theo đơn vị ghi chú (`[In thousands]`, `[In millions]`)[cite: 1].
 
-### Chuẩn hóa kết quả
+### 3. Chuẩn hóa kết quả đa ngôn ngữ (`normalize_final_answer`)
 
-Hàm `normalize_final_answer()` xử lý định dạng câu trả lời cuối cùng nhằm tăng khả năng tương thích với đánh giá tự động, bao gồm:
+- **Làm sạch chuỗi kết quả:** Trích xuất nội dung từ thẻ `<FINAL_ANSWER>` (hoặc dòng kết quả cuối cùng), loại bỏ các tiền tố giải thích thừa (`Answer:`, `Đáp án:`, `Réponse:`,...), dấu ngoặc kép và dấu chấm câu ở cuối[cite: 1].
+- **Định dạng số học đa ngôn ngữ (`detect_decimals`):** Sử dụng Regex để nhận diện yêu cầu về số chữ số thập phân hoặc số nguyên bằng nhiều ngôn ngữ (Anh, Việt, Pháp, Đức, Tây Ban Nha, Bồ Đào Nha, Trung, Hàn), đảm bảo làm tròn chuẩn xác và giữ nguyên các chữ số `0` ở phần thập phân (ví dụ: `14.20`)[cite: 1].
+- **Xử lý các định dạng câu trả lời đặc thù:** Tự động chuẩn hóa câu hỏi dạng `Yes/No`, định dạng từng phần tử trong câu trả lời chứa nhiều giá trị ngăn cách bằng dấu phẩy, và lọc bỏ ký hiệu tiền tệ/phần trăm (`$`, `%`, `,`) khi chuẩn hóa giá trị số[cite: 1].
 
-- Chuẩn hóa số nguyên và số thập phân.
-- Chuẩn hóa danh sách câu trả lời theo định dạng phân tách bằng dấu phẩy khi phù hợp.
-- Chuẩn hóa các câu trả lời dạng Yes/No.
-- Xuất kết quả thành CSV với hai cột `id,answer`.
+### 4. Xử lý song song, theo dõi chi phí và xuất kết quả
 
-Chuẩn hóa định dạng không đảm bảo câu trả lời đúng về mặt ngữ nghĩa. Kết quả cuối cùng vẫn phụ thuộc vào dữ liệu đầu vào, khả năng suy luận, kết quả phân tích và quy tắc đánh giá của BTC.
+- **Thực thi đa luồng (`ThreadPoolExecutor`):** Chạy song song tối đa 3 luồng (`max_workers=3`) để tối ưu hóa thời gian chờ mạng khi gọi API mà vẫn kiểm soát tốt dung lượng RAM tiêu thụ[cite: 1].
+- **Gom log và thống kê chi phí:** Mỗi câu hỏi được gom toàn bộ lịch sử xử lý vào bộ đệm riêng (`logs_buffer`) và in tuần tự qua khóa `print_lock` để tránh trộn lẫn log giữa các luồng, kèm theo thống kê chi tiết số lượng token và chi phí ước tính[cite: 1].
+- **Đầu ra tiêu chuẩn và dự phòng:** Sắp xếp danh sách kết quả theo `id` tăng dần, xuất ra tệp `submission.csv` gồm 2 cột `id,answer` theo đúng quy định và tự động lưu thêm tệp `answers.json` cùng thư mục để đối chiếu khi cần[cite: 1].
 
 ---
 
