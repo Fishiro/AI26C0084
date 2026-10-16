@@ -1,6 +1,5 @@
 python-dotenv
 requests
-fastmcp
 openpyxl
 openai
 pandas
