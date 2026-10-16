@@ -595,10 +595,14 @@ def main():
         print(f"<<< ĐÁP ÁN ID {q_id}: {answer}", file=sys.stderr)
         results.append({"id": q_id, "answer": answer})
 
-        with open(args.output, "w", newline="", encoding="utf-8") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=["id", "answer"])
-            writer.writeheader()
-            writer.writerows(results)
+    with open(args.output, "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=["id", "answer"])
+        writer.writeheader()
+        writer.writerows(results)
+
+    json_output_path = os.path.join(out_dir, "answers.json")
+    with open(json_output_path, "w", encoding="utf-8") as jsonfile:
+        json.dump(results, jsonfile, ensure_ascii=False, indent=2)
 
     print(f"\n{'='*50}\nHOÀN TẤT! Đã xử lý: {len(results)} câu | Tổng Token: {total_tokens} | Tổng Chi phí: ${total_cost:.6f}\n{'='*50}", file=sys.stderr)
 
