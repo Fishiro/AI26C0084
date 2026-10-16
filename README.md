@@ -41,7 +41,7 @@ pip install -r requirements.txt
 python main.py `
   --xlsx-dir ./input `
   --queries ./input/queries.json `
-  --output ./submission_output/submission.csv `
+  --output ./output/submission.csv `
   --openrouter-key "<YOUR_OPENROUTER_KEY>" `
   --openrouter-model qwen/qwen3.7-flash `
   --openrouter-base-url https://openrouter.ai/api/v1
@@ -53,7 +53,7 @@ python main.py `
 python main.py ^
   --xlsx-dir ./input ^
   --queries ./input/queries.json ^
-  --output ./submission_output/submission.csv ^
+  --output ./output/submission.csv ^
   --openrouter-key "<YOUR_OPENROUTER_KEY>" ^
   --openrouter-model qwen/qwen3.7-flash ^
   --openrouter-base-url https://openrouter.ai/api/v1
@@ -65,7 +65,7 @@ python main.py ^
 python main.py \
   --xlsx-dir ./input \
   --queries ./input/queries.json \
-  --output ./submission_output/submission.csv \
+  --output ./output/submission.csv \
   --openrouter-key "<YOUR_OPENROUTER_KEY>" \
   --openrouter-model qwen/qwen3.7-flash \
   --openrouter-base-url https://openrouter.ai/api/v1
@@ -87,7 +87,7 @@ docker build --platform linux/amd64 -t ai26c0084 .
 docker run --rm `
   -v "${PWD}/input:/input/xlsx_files:ro" `
   -v "${PWD}/input/queries.json:/input/queries.json:ro" `
-  -v "${PWD}/submission_output:/output" `
+  -v "${PWD}/output:/output" `
   ai26c0084 `
   --xlsx-dir /input/xlsx_files `
   --queries /input/queries.json `
@@ -103,7 +103,7 @@ docker run --rm `
 docker run --rm \
   -v "$(pwd)/input:/input/xlsx_files:ro" \
   -v "$(pwd)/input/queries.json:/input/queries.json:ro" \
-  -v "$(pwd)/submission_output:/output" \
+  -v "$(pwd)/output:/output" \
   ai26c0084 \
   --xlsx-dir /input/xlsx_files \
   --queries /input/queries.json \

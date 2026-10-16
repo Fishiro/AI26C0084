@@ -547,7 +547,7 @@ def main():
     parser.add_argument("--queries", type=str,
                         default="input/queries.json", help="Đường dẫn tệp queries.json")
     parser.add_argument(
-        "--output", type=str, default="submission_output/submission.csv", help="Đường dẫn tệp kết quả")
+        "--output", type=str, default="output/submission.csv", help="Đường dẫn tệp kết quả")
     parser.add_argument("--openrouter-key", type=str,
                         default=os.getenv("OPENROUTER_API_KEY", ""), help="Khóa API")
     parser.add_argument("--openrouter-model", type=str,

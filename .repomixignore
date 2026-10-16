@@ -13,8 +13,8 @@ env/
 *.ps1
 
 # Bỏ qua dữ liệu Excel mẫu, kết quả xuất ra và file nén
-excel_input/
-submission_output/
+input/
+output/
 xlsx_files/
 *.xlsx
 *.xls
