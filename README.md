@@ -54,8 +54,6 @@ docker run --rm \
 
 ## Chạy trực tiếp bằng Python
 
-Phương án này phù hợp để phát triển, gỡ lỗi và kiểm tra nhanh trong môi trường cục bộ.
-
 ### Yêu cầu môi trường
 
 - Python 3.10 trở lên; khuyến nghị Python 3.11.
