@@ -21,8 +21,9 @@ from openai import OpenAI
 
 load_dotenv()
 
-PRICE_1M_PROMPT = 0.10
-PRICE_1M_COMPLETION = 0.20
+PRICE_1M_PROMPT = 0.030
+PRICE_1M_COMPLETION = 0.130
+PRICE_1M_CACHED = 0.0060
 
 SYSTEM_PROMPT = """Bạn là hệ thống AI chuyên phân tích dữ liệu bảng tính Excel (.xlsx) với độ chính xác tuyệt đối.
 Câu hỏi có thể bằng tiếng Anh, tiếng Việt, tiếng Pháp hoặc ngôn ngữ khác. Hãy trả lời đúng định dạng mà câu hỏi yêu cầu.
@@ -620,6 +621,70 @@ def normalize_final_answer(query: str, raw_text: str) -> str:
     return ans
 
 
+class UsageTracker:
+    """Cộng dồn token và chi phí của mọi lần gọi API trong 1 câu hỏi."""
+
+    def __init__(self):
+        self.prompt = 0
+        self.completion = 0
+        self.cached = 0
+        self.reasoning = 0
+        self.cost = 0.0
+        self.real_calls = 0       # số lần lấy được cost thật từ API
+        self.estimated_calls = 0  # số lần phải tự ước tính
+
+    @staticmethod
+    def _get(obj, name, default=None):
+        if obj is None:
+            return default
+        val = getattr(obj, name, None)
+        if val is None and getattr(obj, "model_extra", None):
+            val = obj.model_extra.get(name)
+        return default if val is None else val
+
+    def add(self, usage) -> float:
+        if not usage:
+            return 0.0
+
+        p = int(self._get(usage, "prompt_tokens", 0) or 0)
+        c = int(self._get(usage, "completion_tokens", 0) or 0)
+        cached = int(self._get(
+            self._get(usage, "prompt_tokens_details"), "cached_tokens", 0) or 0)
+        reasoning = int(self._get(
+            self._get(usage, "completion_tokens_details"), "reasoning_tokens", 0) or 0)
+
+        self.prompt += p
+        self.completion += c
+        self.cached += cached
+        self.reasoning += reasoning
+
+        real_cost = self._get(usage, "cost")
+        if real_cost is not None:
+            step_cost = float(real_cost)
+            self.real_calls += 1
+        else:
+            uncached = max(0, p - cached)
+            step_cost = (uncached * PRICE_1M_PROMPT
+                         + cached * PRICE_1M_CACHED
+                         + c * PRICE_1M_COMPLETION) / 1_000_000
+            self.estimated_calls += 1
+
+        self.cost += step_cost
+        return step_cost
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt + self.completion
+
+    @property
+    def cost_source(self) -> str:
+        if self.estimated_calls == 0 and self.real_calls > 0:
+            return "API"
+        if self.real_calls == 0:
+            return "ước tính"
+        return "hỗn hợp"
+
+
 class QuerySolver:
     def __init__(self, api_key: str, model: str, base_url: str):
         self.client = OpenAI(
@@ -638,119 +703,135 @@ class QuerySolver:
                 self.workspaces[key] = ExcelWorkspace(xlsx_dir, file_name)
             return self.workspaces[key]
 
+    def _chat(self, tracker: UsageTracker, **kwargs):
+        """Gọi API và tự động ghi nhận token + chi phí."""
+        response = self.client.chat.completions.create(
+            extra_body={"usage": {"include": True}},
+            **kwargs,
+        )
+        step_cost = tracker.add(response.usage)
+        return response, step_cost
+
     def process_query(self, q_id: Any, xlsx_dir: str, file_name: str, query: str, log_cb=None) -> Dict[str, Any]:
         if log_cb is None:
             def log_cb(msg): return print(msg, file=sys.stderr)
 
-        ws = self.get_workspace(xlsx_dir, file_name)
-        overview = ws.get_overview()
-
-        messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Question: {query}\n\n{overview}"},
-        ]
-
-        total_p_tokens = 0
-        total_c_tokens = 0
-        total_cost = 0.0
+        tracker = UsageTracker()
         final_answer = ""
 
-        for step in range(6):
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,  # type: ignore
-                tools=TOOLS_SCHEMA,  # type: ignore
-                tool_choice="auto",
-                temperature=0.0,
-            )
+        try:
+            ws = self.get_workspace(xlsx_dir, file_name)
+            overview = ws.get_overview()
 
-            msg = response.choices[0].message
+            messages: List[Dict[str, Any]] = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Question: {query}\n\n{overview}"},
+            ]
 
-            if response.usage:
-                p_tok = response.usage.prompt_tokens
-                c_tok = response.usage.completion_tokens
-                total_p_tokens += p_tok
-                total_c_tokens += c_tok
-                step_cost = (p_tok / 1_000_000 * PRICE_1M_PROMPT) + \
-                    (c_tok / 1_000_000 * PRICE_1M_COMPLETION)
-                total_cost += step_cost
+            for step in range(6):
+                before_p, before_c = tracker.prompt, tracker.completion
+                response, step_cost = self._chat(
+                    tracker,
+                    model=self.model,
+                    messages=messages,  # type: ignore
+                    tools=TOOLS_SCHEMA,  # type: ignore
+                    tool_choice="auto",
+                    temperature=0.0,
+                )
+                msg = response.choices[0].message
+
                 log_cb(
-                    f"  [Step {step+1}] Tokens: Prompt={p_tok}, Comp={c_tok} | Chi phí: ${step_cost:.6f}")
+                    f"  [Step {step+1}] Prompt={tracker.prompt - before_p}, "
+                    f"Comp={tracker.completion - before_c} | Chi phí: ${step_cost:.6f}")
 
-            if msg.content:
-                for t in re.findall(r"<THOUGHT>(.*?)</THOUGHT>", msg.content, re.DOTALL | re.IGNORECASE):
-                    log_cb(f"  [THOUGHT]: {t.strip()[:250]}")
+                if msg.content:
+                    for t in re.findall(r"<THOUGHT>(.*?)</THOUGHT>", msg.content, re.DOTALL | re.IGNORECASE):
+                        log_cb(f"  [THOUGHT]: {t.strip()[:250]}")
 
-            if msg.tool_calls:
-                messages.append({
-                    "role": "assistant",
-                    "content": msg.content or "",
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                        }
-                        for tc in msg.tool_calls
-                        if tc.type == "function"
-                    ],
-                })
-
-                for tc in msg.tool_calls:
-                    if tc.type != "function":
-                        continue
-                    t_name = tc.function.name
-                    try:
-                        t_args = json.loads(tc.function.arguments)
-                    except Exception:
-                        t_args = {}
-
-                    log_cb(f"  [CALL]: {t_name}")
-                    if t_name == "run_python_analysis":
-                        tool_out = ws.run_python(t_args.get("python_code", ""))
-                    elif t_name == "read_sheet_grid":
-                        tool_out = ws.read_grid(
-                            t_args.get("sheet_name", ""),
-                            int(t_args.get("start_row", 1)),
-                            int(t_args.get("end_row", 120)),
-                        )
-                    elif t_name == "search_keyword":
-                        tool_out = ws.search_keyword(t_args.get("keyword", ""))
-                    else:
-                        tool_out = f"Tool '{t_name}' không tồn tại."
-
-                    log_cb(f"  [OUTPUT]: {str(tool_out).strip()[:250]}")
+                if msg.tool_calls:
                     messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "name": t_name,
-                        "content": str(tool_out)[:6000],
+                        "role": "assistant",
+                        "content": msg.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                            }
+                            for tc in msg.tool_calls
+                            if tc.type == "function"
+                        ],
                     })
-            else:
-                messages.append(
-                    {"role": "assistant", "content": msg.content or ""})
-                final_answer = normalize_final_answer(query, msg.content or "")
-                if final_answer:
-                    break
+
+                    for tc in msg.tool_calls:
+                        if tc.type != "function":
+                            continue
+                        t_name = tc.function.name
+                        try:
+                            t_args = json.loads(tc.function.arguments)
+                        except Exception:
+                            t_args = {}
+
+                        log_cb(f"  [CALL]: {t_name}")
+                        if t_name == "run_python_analysis":
+                            tool_out = ws.run_python(
+                                t_args.get("python_code", ""))
+                        elif t_name == "read_sheet_grid":
+                            tool_out = ws.read_grid(
+                                t_args.get("sheet_name", ""),
+                                int(t_args.get("start_row", 1)),
+                                int(t_args.get("end_row", 120)),
+                            )
+                        elif t_name == "search_keyword":
+                            tool_out = ws.search_keyword(
+                                t_args.get("keyword", ""))
+                        else:
+                            tool_out = f"Tool '{t_name}' không tồn tại."
+
+                        log_cb(f"  [OUTPUT]: {str(tool_out).strip()[:250]}")
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": t_name,
+                            "content": str(tool_out)[:6000],
+                        })
+                else:
+                    messages.append(
+                        {"role": "assistant", "content": msg.content or ""})
+                    final_answer = normalize_final_answer(
+                        query, msg.content or "")
+                    if final_answer:
+                        break
+                    messages.append({
+                        "role": "user",
+                        "content": "Hãy xuất đáp án cuối cùng vào trong cặp thẻ <FINAL_ANSWER>...</FINAL_ANSWER>.",
+                    })
+
+            if not final_answer:
                 messages.append({
                     "role": "user",
-                    "content": "Hãy xuất đáp án cuối cùng vào trong cặp thẻ <FINAL_ANSWER>...</FINAL_ANSWER>.",
+                    "content": "Dựa vào kết quả trên, xuất ngay đáp án duy nhất trong thẻ <FINAL_ANSWER>...</FINAL_ANSWER>.",
                 })
+                resp, step_cost = self._chat(
+                    tracker, model=self.model, messages=messages, temperature=0.0)  # type: ignore
+                log_cb(f"  [Fallback] Chi phí: ${step_cost:.6f}")
+                final_answer = normalize_final_answer(
+                    query, resp.choices[0].message.content or "")
 
-        if not final_answer:
-            messages.append({
-                "role": "user",
-                "content": "Dựa vào kết quả trên, xuất ngay đáp án duy nhất trong thẻ <FINAL_ANSWER>...</FINAL_ANSWER>.",
-            })
-            resp = self.client.chat.completions.create(
-                model=self.model, messages=messages, temperature=0.0)  # type: ignore
-            if resp.usage:
-                total_p_tokens += resp.usage.prompt_tokens
-                total_c_tokens += resp.usage.completion_tokens
-            final_answer = normalize_final_answer(
-                query, resp.choices[0].message.content or "")
+        except Exception as e:
+            # Lỗi giữa chừng vẫn giữ lại token/chi phí đã tiêu
+            log_cb(f"  [LỖI process_query]: {e}")
 
-        return {"answer": final_answer, "cost": total_cost, "tokens": total_p_tokens + total_c_tokens}
+        log_cb(
+            f"  [USAGE] prompt={tracker.prompt} (cached={tracker.cached}) | "
+            f"completion={tracker.completion} (reasoning={tracker.reasoning}) | "
+            f"nguồn chi phí: {tracker.cost_source}")
+
+        return {
+            "answer": final_answer,
+            "cost": tracker.cost,
+            "tokens": tracker.total_tokens,
+        }
 
 
 def main():
