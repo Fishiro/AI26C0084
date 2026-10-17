@@ -62,7 +62,7 @@ docker run --rm \
 
 ### Cài đặt thư viện
 
-Tại thư mục gốc dự án `AI260084`, chạy:
+Tại thư mục gốc dự án `AI26C0084`, chạy:
 
 ```bash
 python -m pip install -r requirements.txt
@@ -111,7 +111,7 @@ Giải pháp được thiết kế gói gọn trong `main.py`, kết hợp giữ
 ### 1. ExcelWorkspace - Tiền xử lý thông minh và Tối ưu Token động
 
 - **Làm phẳng không gian ô gộp (Unmerge & Context Preservation):** Các tệp thống kê thường lạm dụng ô gộp (`merged_cells`). Hệ thống sử dụng `openpyxl` với `data_only=True` để đọc giá trị thực, sau đó tự động unmerge toàn bộ và điền sao chép giá trị của ô gốc (top-left) vào tất cả các ô thành phần. Điều này giúp Pandas sau này không bị lỗi `NaN` khi truy xuất tọa độ.
-- **Thuật toán "Ngân sách dòng toàn cục" (Global Token Budget):** Không giới hạn cố định số dòng cố định cho hàm `get_overview`. Hệ thống tính toán động dựa trên số lượng sheets: nếu file chỉ có 1 sheet, nó cấp phát tới 50 dòng để mường tượng tối đa; nhưng nếu file có 15 sheets, nó sẽ ép nén mỗi sheet xuống 15 dòng đầu. Đảm bảo Context Window của Prompt luôn an toàn dưới giới hạn Token và tiết kiệm chi phí (`< 0.10$`).
+- **Ngân sách dòng theo số sheet (`get_overview`):** Số dòng xem trước mỗi sheet được chia theo số sheet: file 1 sheet hiển thị tối đa 150 dòng; file nhiều sheet hiển thị khoảng 150 ÷ số sheet dòng mỗi sheet, tối thiểu 20 dòng. Mỗi ô được cắt tối đa 65 ký tự để Prompt gọn và tiết kiệm token.
 - **Chuẩn hóa Header & Loại bỏ Title rác (`load_df`):** Tự động bỏ qua các dòng rỗng. Phát hiện dòng Header đích thực bằng cách quét tìm dòng đầu tiên chứa nhiều hơn 2 cột có dữ liệu thực tế. Tránh hoàn toàn việc Pandas lấy nhầm dòng Title báo cáo (VD: _"Báo cáo tài chính quý 3"_) làm tên Header, đồng thời gộp an toàn các tiêu đề đa tầng (MultiIndex) thành chuỗi phẳng.
 
 ### 2. QuerySolver - Agent Tự phục hồi và Thực thi an toàn (Self-Healing Agent)
@@ -134,7 +134,8 @@ Giải pháp được thiết kế gói gọn trong `main.py`, kết hợp giữ
 
 - **Thực thi Đa luồng (`ThreadPoolExecutor`):** Chạy song song `max_workers=3`. Giúp tận dụng tối đa 6 vCPU để đánh bại thời gian trễ của API mạng, nhưng vẫn nằm an toàn dưới ngưỡng tràn RAM của BTC.
 - **Quản lý Console Log bất đồng bộ:** Áp dụng mô hình "Gom log cục bộ" (`logs_buffer`) và khóa đồng bộ hóa in ấn (`print_lock`), giúp các đoạn log chi tiết (THOUGHT, CALL, OUTPUT, COST) của từng câu hỏi không bị trộn lẫn nát bét trên màn hình Terminal.
-- **Xuất File & Đo lường chi phí:** Đáp ứng tuyệt đối cấu trúc nộp bài bằng cách lưu mảng cuối cùng (đã sort theo `id`) ra tệp `submission.csv` (2 cột: id, answer). Đồng thời ghi toàn bộ siêu dữ liệu vòng đời (Cost, Tokens, Log lỗi) vào tệp `answers.json` nội bộ để dễ dàng audit chi phí thực tế.
+- **Đo token và chi phí thực (`UsageTracker`):** Token lấy từ `usage` của API. Chi phí lấy từ `usage.cost` do OpenRouter trả về (yêu cầu qua `usage.include`); chỉ khi API không trả về mới ước tính theo giá cố định (`$0.030` input, `$0.130` output, `$0.006` cached mỗi 1M token). Mọi lần gọi API đều được tính, kể cả lần dự phòng, và lỗi giữa chừng vẫn giữ lại token đã tiêu. Dòng log `[USAGE]` cho biết nguồn chi phí (API / ước tính / hỗn hợp).
+- **Xuất file:** Lưu mảng kết quả (đã sort theo `id`) ra `submission.csv` (2 cột: id, answer) theo đúng yêu cầu nộp bài, đồng thời ghi `answers.json` (id, answer, cost, tokens) cùng thư mục để đối chiếu chi phí.
 
 ---
 

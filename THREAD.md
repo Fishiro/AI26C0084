@@ -154,7 +154,7 @@ Vai trò của các thư viện:
 | `contextlib`         | Chuyển hướng stdout để thu kết quả của code thực thi                        |
 | `threading`          | Khóa đồng bộ khi truy cập cache hoặc in log                                 |
 | `concurrent.futures` | Chạy các câu hỏi song song                                                  |
-| `time`               | Đo thời gian và tính chi phí liên quan đến token                            |
+| `time`               | Đo tổng thời gian chạy                                                      |
 | `openpyxl`           | Đọc và xử lý các workbook Excel                                             |
 | `pandas`             | Chuyển bảng Excel thành DataFrame để phân tích                              |
 | `dotenv`             | Đọc các biến môi trường từ file `.env`                                      |
@@ -176,35 +176,15 @@ OPENROUTER_API_KEY=your_api_key
 
 Giá trị API Key sẽ được đọc khi khởi tạo tham số dòng lệnh trong hàm `main()`.
 
-### 2.3. Các hằng số tính chi phí
+### 2.3. Các hằng số giá dự phòng
 
 ```python
-PRICE_1M_PROMPT = 0.10
-PRICE_1M_COMPLETION = 0.20
+PRICE_1M_PROMPT = 0.030
+PRICE_1M_COMPLETION = 0.130
+PRICE_1M_CACHED = 0.0060
 ```
 
-Ý nghĩa:
-
-- `PRICE_1M_PROMPT`: mức giá được cấu hình là 0,10 USD cho một triệu prompt token.
-- `PRICE_1M_COMPLETION`: mức giá được cấu hình là 0,20 USD cho một triệu completion token.
-
-Đây là các hằng số mà chương trình dùng để ước tính chi phí. Chúng không tự động lấy giá thực tế của model từ OpenRouter.
-
-Công thức được dùng trong `QuerySolver.process_query()`:
-
-```python
-step_cost = (
-    p_tok / 1_000_000 * PRICE_1M_PROMPT
-) + (
-    c_tok / 1_000_000 * PRICE_1M_COMPLETION
-)
-```
-
-Trong đó:
-
-- `p_tok`: số prompt token của lần gọi API hiện tại.
-- `c_tok`: số completion token của lần gọi API hiện tại.
-- `step_cost`: chi phí ước tính cho lần gọi đó.
+Đơn vị USD / 1 triệu token, theo trang giá OpenRouter của `qwen/qwen3.7-flash`. Các hằng số này chỉ dùng khi API không trả về chi phí thực; giá có thể đổi theo provider nên cần cập nhật khi OpenRouter đổi giá. Cách tính xem mục 6.3.
 
 ---
 
@@ -1087,7 +1067,21 @@ Nếu chưa tồn tại, hàm:
 
 Cơ chế này giảm việc đọc lại cùng một file Excel nhiều lần.
 
-### 6.3. Hàm `process_query()`
+### 6.3. Lớp `UsageTracker` và hàm `_chat()`
+
+`UsageTracker` cộng dồn token và chi phí của mọi lần gọi API trong một câu hỏi. Mỗi câu hỏi có một tracker riêng nên an toàn khi chạy đa luồng.
+
+Mỗi lần gọi `add(usage)`:
+
+- Đọc `prompt_tokens`, `completion_tokens`, `cached_tokens`, `reasoning_tokens` từ phản hồi API.
+- Nếu API trả `usage.cost`: dùng chi phí thực này.
+- Nếu không: ước tính = token chưa cache × giá prompt + token cache × giá cached + token completion × giá completion.
+
+`_chat()` bọc lời gọi API: gửi kèm `extra_body={"usage": {"include": True}}` để OpenRouter trả chi phí, rồi gọi `tracker.add()`. Vòng lặp chính và lần gọi dự phòng đều đi qua hàm này nên không bị sót.
+
+Thuộc tính `cost_source` cho biết chi phí lấy từ "API", "ước tính" hoặc "hỗn hợp"; giá trị được in ở dòng log `[USAGE]`.
+
+### 6.4. Hàm `process_query()`
 
 ```python
 def process_query(
@@ -1151,73 +1145,35 @@ Hai thông điệp ban đầu:
 
 Mỗi lượt gọi API hoặc gọi Tool sẽ bổ sung thông tin vào danh sách này.
 
-#### Bước 3: Khởi tạo các biến theo dõi
+#### Bước 3: Khởi tạo bộ đếm token
 
 ```python
-total_p_tokens = 0
-total_c_tokens = 0
-total_cost = 0.0
+tracker = UsageTracker()
 final_answer = ""
 ```
 
-| Biến             | Ý nghĩa                                          |
-| ---------------- | ------------------------------------------------ |
-| `total_p_tokens` | Tổng prompt token được ghi nhận                  |
-| `total_c_tokens` | Tổng completion token được ghi nhận              |
-| `total_cost`     | Tổng chi phí ước tính trong vòng lặp Agent chính |
-| `final_answer`   | Đáp án cuối cùng sau chuẩn hóa                   |
+Toàn bộ xử lý (bước 1 đến 9) nằm trong khối `try`. Nếu lỗi giữa chừng, `tracker` vẫn giữ token và chi phí đã tiêu để trả về ở bước 10.
 
 #### Bước 4: Bắt đầu vòng lặp Agent
 
 ```python
 for step in range(6):
-    response = self.client.chat.completions.create(
+    response, step_cost = self._chat(
+        tracker,
         model=self.model,
         messages=messages,
         tools=TOOLS_SCHEMA,
         tool_choice="auto",
         temperature=0.0,
     )
+    msg = response.choices[0].message
 ```
 
-Chương trình cho phép tối đa sáu lượt gọi trong vòng lặp chính.
-
-Tham số `tool_choice="auto"` cho phép mô hình lựa chọn trả lời trực tiếp hoặc gọi công cụ.
-
-`temperature=0.0` được dùng để giảm tính ngẫu nhiên trong quá trình sinh kết quả.
-
-Phản hồi nhận được được gán cho:
-
-```python
-msg = response.choices[0].message
-```
-
-`msg` chứa nội dung trả lời và thông tin về các yêu cầu gọi Tool nếu có.
+Tối đa sáu lượt gọi. `tool_choice="auto"` cho phép mô hình trả lời trực tiếp hoặc gọi công cụ; `temperature=0.0` giảm tính ngẫu nhiên. Token và chi phí của mỗi lượt được `_chat()` ghi vào `tracker`, `log_cb` in ra phần token và chi phí của lượt đó.
 
 #### Bước 5: Ghi nhận token và chi phí
 
-```python
-if response.usage:
-    p_tok = response.usage.prompt_tokens
-    c_tok = response.usage.completion_tokens
-
-    total_p_tokens += p_tok
-    total_c_tokens += c_tok
-
-    step_cost = (
-        p_tok / 1_000_000 * PRICE_1M_PROMPT
-    ) + (
-        c_tok / 1_000_000 * PRICE_1M_COMPLETION
-    )
-
-    total_cost += step_cost
-```
-
-Các biến `p_tok` và `c_tok` chứa số token của lần gọi API hiện tại.
-
-Chi phí được tính bằng cách nhân số token từng loại với mức giá cấu hình.
-
-Thông tin được ghi lại qua `log_cb` để theo dõi quá trình xử lý.
+Đã được `_chat()` thực hiện ở bước 4 (xem mục 6.3), không cần tính lại trong vòng lặp.
 
 #### Bước 6: Ghi nhận phần THOUGHT
 
@@ -1355,55 +1311,21 @@ Nếu chưa có đáp án, chương trình bổ sung yêu cầu mô hình trả 
 
 #### Bước 9: Xử lý khi hết sáu lượt nhưng chưa có đáp án
 
-```python
-if not final_answer:
-    messages.append({
-        "role": "user",
-        "content": (
-            "Dựa vào kết quả trên, xuất ngay đáp án duy nhất "
-            "trong thẻ <FINAL_ANSWER>...</FINAL_ANSWER>."
-        ),
-    })
+Chương trình thêm yêu cầu xuất `<FINAL_ANSWER>` rồi gọi API thêm một lần qua `self._chat(tracker, ...)`. Lần gọi này được tính cả token lẫn chi phí vào `tracker`.
 
-    resp = self.client.chat.completions.create(
-        model=self.model,
-        messages=messages,
-        temperature=0.0
-    )
-
-    if resp.usage:
-        total_p_tokens += resp.usage.prompt_tokens
-        total_c_tokens += resp.usage.completion_tokens
-
-    final_answer = normalize_final_answer(
-        query,
-        resp.choices[0].message.content or ""
-    )
-```
-
-Đây là lần gọi API dự phòng ngoài vòng lặp chính.
-
-Mục đích là yêu cầu mô hình xuất đáp án cuối cùng sau các bước phân tích trước đó.
-
-Lưu ý: Trong đoạn code này, token của lần gọi dự phòng được cộng vào tổng token, nhưng chi phí của lần gọi này không được cộng vào `total_cost`.
+Nếu có ngoại lệ ở bất kỳ bước nào, khối `except` ghi log lỗi và hàm vẫn trả về kết quả với token và chi phí đã tiêu.
 
 #### Bước 10: Trả kết quả
 
 ```python
 return {
     "answer": final_answer,
-    "cost": total_cost,
-    "tokens": total_p_tokens + total_c_tokens
+    "cost": tracker.cost,
+    "tokens": tracker.total_tokens,
 }
 ```
 
-Hàm trả về dictionary có ba trường:
-
-- `answer`: đáp án cuối cùng.
-- `cost`: chi phí ước tính theo cách tính trong vòng lặp chính.
-- `tokens`: tổng số token đã ghi nhận, bao gồm cả lần gọi dự phòng nếu có.
-
-Dictionary này là kết quả đầu ra của `QuerySolver.process_query()` và được chuyển về cho `process_item()` trong `main()`.
+Trước khi trả về, hàm ghi dòng log `[USAGE]` gồm prompt (kèm cached), completion (kèm reasoning) và nguồn chi phí. Dictionary này được chuyển về `process_item()` trong `main()`.
 
 ---
 
@@ -1721,7 +1643,7 @@ except Exception as e:
     }
 ```
 
-Worker ghi nhận lỗi và trả về đáp án rỗng cùng chi phí, token bằng 0.
+Lỗi phát sinh bên trong `process_query()` đã được hàm này tự bắt và vẫn giữ lại token đã tiêu. Khối `except` ở đây chỉ xử lý lỗi ngoài `process_query()` và trả về đáp án rỗng, chi phí và token bằng 0.
 
 Nhờ đó, một lỗi trong câu hỏi không nhất thiết khiến worker phải trả về một kết quả không đúng cấu trúc mong đợi của `main()`.
 
@@ -1767,7 +1689,9 @@ for future in concurrent.futures.as_completed(futures):
 
     results.append({
         "id": res_data["id"],
-        "answer": res_data["answer"]
+        "answer": res_data["answer"],
+        "cost": res_data["cost"],
+        "tokens": res_data["tokens"]
     })
 
     total_cost += res_data["cost"]
@@ -1780,13 +1704,11 @@ for future in concurrent.futures.as_completed(futures):
 
 Sau đó:
 
-- Chỉ `id` và `answer` được thêm vào `results`.
+- `id`, `answer`, `cost`, `tokens` được thêm vào `results`.
 - `cost` được cộng vào `total_cost`.
 - `tokens` được cộng vào `total_tokens`.
 
 Đây là nơi thống kê của từng câu hỏi được tổng hợp thành thống kê toàn chương trình.
-
-**Một điểm cần phân biệt:** `res_data` có cả bốn trường `id`, `answer`, `cost`, `tokens`, nhưng phần tử được thêm vào `results` chỉ có hai trường `id` và `answer`.
 
 ---
 
@@ -1909,7 +1831,7 @@ File `answers.json` được đặt cùng thư mục với `submission.csv`.
 
 Tham số `ensure_ascii=False` giữ các ký tự Unicode, còn `indent=2` định dạng JSON dễ đọc.
 
-Tuy nhiên, theo code thực tế, biến `results` chỉ chứa `id` và `answer`, nên `answers.json` cũng chỉ chứa hai trường đó. Mặc dù phần chú thích trong mã nhắc đến `cost` và `tokens`, các trường này không được giữ lại khi tạo `results`.
+File `answers.json` chứa `id`, `answer`, `cost`, `tokens` cho từng câu hỏi, dùng để đối chiếu chi phí. `submission.csv` vẫn chỉ có hai cột `id` và `answer` theo yêu cầu nộp bài.
 
 ---
 
@@ -1964,7 +1886,7 @@ Các thông tin này cho biết:
 - Tổng số câu hỏi có trong danh sách kết quả.
 - Thời gian chạy.
 - Tổng token được ghi nhận.
-- Tổng chi phí ước tính.
+- Tổng chi phí (ưu tiên chi phí thực từ API).
 - Đường dẫn tuyệt đối đến hai file đầu ra.
 
 Khi hoàn thành đoạn này, hàm `main()` kết thúc và chương trình kết thúc nếu không còn tác vụ nào khác.
@@ -1989,7 +1911,7 @@ Bảng dưới đây tổng hợp vòng đời của những biến chính trong
 | `logs_buffer`     | `process_item()`               | Lưu log riêng cho từng câu hỏi           | Được in ra stderr                             |
 | `res_data`        | Vòng lặp Future trong `main()` | Kết quả của worker                       | Được dùng để tổng hợp đáp án và thống kê      |
 | `results`         | `main()`                       | Danh sách kết quả đã thu thập            | Được sắp xếp rồi ghi CSV và JSON              |
-| `total_cost`      | `main()`                       | Tổng chi phí được cộng dồn               | Được in ở cuối chương trình                   |
+| `total_cost`      | `main()`                       | Tổng chi phí thực/ước tính cộng dồn      | Được in ở cuối chương trình                   |
 | `total_tokens`    | `main()`                       | Tổng token được cộng dồn                 | Được in ở cuối chương trình                   |
 | `elapsed_time`    | Cuối `main()`                  | Chênh lệch thời gian bắt đầu và kết thúc | Được chuyển thành phút và giây                |
 
@@ -2070,13 +1992,9 @@ Cơ chế này cho phép Agent thử lại trong giới hạn vòng lặp đã t
 
 Các worker hoàn thành không theo thứ tự cố định. Chương trình chủ động sắp xếp lại `results` theo ID trước khi ghi CSV để giảm sự phụ thuộc vào thứ tự thực thi.
 
-### 14.4. Cần lưu ý phạm vi tính chi phí
+### 14.4. Nguồn của chi phí
 
-Lần gọi API dự phòng cuối `process_query()` có cộng token vào `total_p_tokens` và `total_c_tokens`, nhưng không cộng chi phí vào `total_cost`. Vì vậy, tổng chi phí in ra có thể thấp hơn chi phí được tính theo cùng công thức cho tất cả các lần gọi API.
-
-### 14.5. answers.json hiện không lưu metadata chi phí
-
-Mặc dù worker trả về cả `cost` và `tokens`, code chỉ thêm `id` và `answer` vào `results`. Vì vậy, file `answers.json` hiện tại không chứa các trường chi phí và token.
+Chi phí ưu tiên lấy từ `usage.cost` của OpenRouter; chỉ khi thiếu mới ước tính theo giá dự phòng ở mục 2.3. Sau mỗi câu hỏi, dòng log `[USAGE]` cho biết nguồn là "API", "ước tính" hay "hỗn hợp". Nếu thấy "ước tính", hãy kiểm tra lại tham số `usage.include` và giá trong code.
 
 ---
 
@@ -2091,7 +2009,7 @@ Mặc dù worker trả về cả `cost` và `tokens`, code chỉ thêm `id` và 
 
 Toàn bộ luồng thực thi bắt đầu tại `if __name__ == "__main__": main()`, đi qua các bước chuẩn bị dữ liệu, xử lý từng câu hỏi bằng Agent, rồi kết thúc tại phần tổng kết thống kê.
 
-Tệp kết quả chính là `submission.csv`, chứa hai trường `id` và `answer`. File `answers.json` được tạo cùng thư mục để lưu lại danh sách kết quả theo cấu trúc JSON.
+Tệp kết quả chính là `submission.csv`, chứa hai trường `id` và `answer`. File `answers.json` được tạo cùng thư mục, bổ sung `cost` và `tokens` của từng câu.
 
 **Mã nguồn:** https://github.com/Fishiro/AI26C0084/blob/main/main.py
 

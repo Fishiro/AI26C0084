@@ -1,0 +1,32 @@
+[
+    {
+        "id": "ext_q001",
+        "file_name": "p2_t02.xlsx",
+        "query": "In the table, how much higher is the Dec. 2024 unadjusted index of 'Education' than that of 'Communication'? Round to 3 decimal places.",
+        "expected_answer": "219.319"
+    },
+    {
+        "id": "ext_q002",
+        "file_name": "p2_t09.xlsx",
+        "query": "In the first table (table_0), what is the average of 'Total segment revenue' across Fiscal2014, Fiscal2013 and Fiscal2012 (in millions)? Round to 2 decimal places.",
+        "expected_answer": "2029.67"
+    },
+    {
+        "id": "ext_q003",
+        "file_name": "p2_t10.xlsx",
+        "query": "In the credit exposure table (2016 column, in millions), what is the combined exposure net of all collateral for the three rating bands BBB+/Baa1 to BBB-/Baa3, BB+/Ba1 to B-/B3, and CCC+/Caa1 and below? Answer as an integer.",
+        "expected_answer": "21419"
+    },
+    {
+        "id": "ext_q004",
+        "file_name": "p2_t05.xlsx",
+        "query": "In 2023, how many percentage points higher is the share of women employed in 'Service occupations' than the share of men in the same occupation group (TOTAL section)? Round to 1 decimal place.",
+        "expected_answer": "6.7"
+    },
+    {
+        "id": "ext_q005",
+        "file_name": "p2_t06.xlsx",
+        "query": "For Private industry, what is the average of the mean incidence rates across the five establishment size classes (1 - 10, 11 - 49, 50 - 249, 250 - 999, 1,000+), excluding 'Total all sizes'? Round to 2 decimal places.",
+        "expected_answer": "2.60"
+    }
+]
