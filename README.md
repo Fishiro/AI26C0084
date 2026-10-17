@@ -155,8 +155,6 @@ AI26C0084/
     └── submission.csv
 ```
 
-`input/` và `output/` là các thư mục dùng trong ví dụ chạy thử; không nhất thiết phải được đóng gói vào image. Khi chấm thi, BTC có thể mount dữ liệu thực tế vào container theo đúng giao diện đầu vào đã quy định.
-
 ---
 
 ## Tóm tắt quy trình chạy

@@ -32,24 +32,43 @@ QUY TẮC BẮT BUỘC (CHAIN OF THOUGHT):
 2. Nếu bảng nhỏ và bạn đã thấy rõ đáp án chính xác trên bảng xem trước (Overview), hãy xuất ngay <FINAL_ANSWER>.
 3. Nếu cần chạy Python tool, hãy SỬ DỤNG CÁC HÀM TRỢ THỦ SAU đây thay vì tự viết logic pandas phức tạp để tránh lỗi:
    - `df = load_df()`: Lấy DataFrame an toàn (đã tự động gộp header).
-   - `find_row(df, "keyword")`: Trả về Index (số dòng) của dòng đầu tiên chứa keyword (không phân biệt hoa/thường). Trả về -1 nếu không thấy.
-   - `find_col(df, "keyword")`: Trả về tên cột chứa keyword. Trả về None nếu không thấy.
-   - `get_val(df, row_idx, col_name_or_idx)`: Lấy giá trị an toàn tại dòng/cột.
-   - Ví dụ an toàn: 
+   - `df = extract_table(df, "keyword")`: RẤT QUAN TRỌNG! Nếu DataFrame bị dính các dòng tiêu đề báo cáo dài (title) làm hỏng Header, hãy gọi hàm này với `keyword` là tên của một cột thực sự để cắt bỏ title và thiết lập lại Header chuẩn.
+   - `find_row(df, "keyword")`: Trả về Index của dòng ĐẦU TIÊN chứa keyword.
+   - `find_cells(df, "keyword")`: Trả về DANH SÁCH TẤT CẢ các Index dòng chứa keyword.
+   - `find_col(df, "keyword")`: Trả về tên cột chứa keyword.
+   - `get_val(df, row_idx, col_name_or_idx)`: Lấy giá trị an toàn.
+   - `clean_num(val)`: Ép kiểu 1 giá trị thành số thực (float) an toàn (xóa $, %, dấu phẩy, xử lý ký tự '-').
+   - `clean_col(df, "col_name")`: Ép kiểu toàn bộ 1 cột thành số thực an toàn. Trả về Pandas Series.
+
+   * VÍ DỤ AN TOÀN 1 (Tìm và lấy 1 ô dữ liệu):
      ```python
      df = load_df()
      r = find_row(df, "Mexican")
      c = find_col(df, "2023")
      if r != -1 and c:
-         print(get_val(df, r, c))
+         val = get_val(df, r, c)
+         print(clean_num(val)) # Luôn clean_num trước khi in/tính toán
      ```
+   
+   * VÍ DỤ AN TOÀN 2 (Cắt bảng, làm sạch cột và tính toán):
+     ```python
+     df = load_df()
+     df = extract_table(df, "Occupation") 
+     c = find_col(df, "Total")
+     if c:
+         df[c] = clean_col(df, c) 
+         # BẮT BUỘC DÙNG round(val, 4) ĐỂ TRÁNH LỖI SỐ THẬP PHÂN PYTHON (VD: 30.299999997)
+         result = round(df[c].sum(), 4)
+         print(result)
+     ```
+
    - NẾU TỰ VIẾT PANDAS: 
-     - KHÔNG BAO GIỜ dùng `.loc['Tên dòng']` hoặc `df['Tên cột đầy đủ']` vì tên cột do gộp ô rất dài và có ký tự ẩn. LUÔN in `df.columns.tolist()` để kiểm tra, hoặc ưu tiên dùng `.iloc[row_idx, col_idx]`.
-     - KHÔNG dùng `.astype(float)`. Luôn dùng `pd.to_numeric(df[col], errors='coerce')` khi ép kiểu toán học.
+     - KHÔNG BAO GIỜ dùng `.loc['Tên dòng']` hoặc `df['Tên cột đầy đủ']` vì tên cột do gộp ô rất dài và có ký tự ẩn. Ưu tiên dùng `.iloc[row_idx, col_idx]`.
+     - KHÔNG DÙNG `.astype(float)` hay `pd.to_numeric` thủ công vì sẽ lỗi với ký tự `,` hoặc `$`. Luôn dùng `clean_col()`.
      - Luôn in kết quả ra màn hình bằng lệnh `print()`. Nếu code báo lỗi, hãy đọc log lỗi để sửa lại code chứ không lặp lại.
 4. CẢNH BÁO QUAN TRỌNG VỀ SUY LUẬN DỮ LIỆU ĐỂ ĐẠT EXACT MATCH:
    - QUY TẮC TÍNH TRUNG BÌNH/TỔNG: Theo quy ước BTC, nếu câu hỏi yêu cầu tính trung bình/tổng "across all..." (ví dụ: across all education levels) mà KHÔNG yêu cầu loại trừ, bạn BẮT BUỘC PHẢI TÍNH TRÊN TOÀN BỘ CÁC CỘT (BAO GỒM CẢ CỘT "TOTAL"). Không tự ý loại bỏ dòng/cột Total trong trường hợp này.
-   - QUY TẮC TÍNH TUỔI: Nếu bảng có cột `Date of Birth` và `Date of Admission`, thuật ngữ "youngest/oldest" (trẻ nhất/già nhất) ngầm định là tính tại thời điểm nhập học. Hãy tính tuổi bằng cách lấy `Date of Admission` trừ đi `Date of Birth` (Tuổi nhập học thấp = Trẻ nhất).
+   - QUY TẮC TÍNH TUỔI: Nếu bảng có cột Date of Birth và Date of Admission, hãy tính tuổi bằng cách lấy Date of Admission trừ đi Date of Birth (Tuổi nhập học thấp = Trẻ nhất). BẮT BUỘC dùng hàm trợ thủ df['col'] = parse_date(df, 'col') để ép kiểu cả 2 cột sang ngày tháng trước khi trừ để tránh lỗi TypeError.
    - GIỮ NGUYÊN GIÁ TRỊ GỐC: Nếu tiêu đề bảng có ghi chú đơn vị (ví dụ: "[In thousands]", "[In millions]"), TUYỆT ĐỐI KHÔNG tự ý nhân thêm 1000 hay 1000000. Trả về con số y hệt như nó hiển thị trong ô.
 5. Khi đã có kết quả cuối cùng, đặt ĐÁP ÁN DUY NHẤT vào thẻ <FINAL_ANSWER>...</FINAL_ANSWER>:
    - Chỉ ghi đáp án, tuyệt đối không kèm lời giải thích hay đơn vị thừa.
@@ -87,6 +106,20 @@ TOOLS_SCHEMA = [
                     "end_row": {"type": "integer", "default": 120},
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_keyword",
+            "description": "Tìm kiếm nhanh vị trí (Sheet, Dòng, Cột) của một từ khóa trên toàn bộ các sheets của file Excel. Dùng khi không biết dữ liệu nằm ở sheet nào hoặc bảng quá lớn.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {"type": "string", "description": "Từ khóa cần tìm (Ví dụ: 'Total', 'Revenue', 'Mexican')"}
+                },
+                "required": ["keyword"],
             },
         },
     },
@@ -143,24 +176,34 @@ class ExcelWorkspace:
             self.sheets_raw[name] = data
         wb.close()
 
-    def get_overview(self, max_preview_rows: int = 35) -> str:
+    def get_overview(self, global_max_rows: int = 150, max_cols: int = 20) -> str:
         out = [
             f"=== WORKBOOK: {os.path.basename(self.file_path)} | Danh sách Sheets: {list(self.sheets_raw.keys())} ==="]
+        total_sheets = len(self.sheets_raw)
+
+        if total_sheets == 0:
+            return "\n".join(out)
+
+        base_budget_per_sheet = max(15, global_max_rows // total_sheets)
+
         for name, data in self.sheets_raw.items():
             total_r = len(data)
             total_c = len(data[0]) if total_r > 0 else 0
+
+            max_r = min(total_r, max(base_budget_per_sheet,
+                        35 if total_sheets == 1 else 20))
+
             out.append(
-                f"\n--- SHEET: '{name}' (Kích thước: {total_r} dòng x {total_c} cột | Ô gộp đã tách: {self.merged_counts[name]}) ---"
-            )
+                f"\n--- SHEET: '{name}' (Kích thước: {total_r} dòng x {total_c} cột | Ô gộp đã tách: {self.merged_counts.get(name, 0)}) ---")
             if total_r == 0 or total_c == 0:
                 out.append("(Sheet trống)")
                 continue
 
-            max_r = min(max_preview_rows, total_r)
-            max_c = min(20, total_c)
+            max_c = min(max_cols, total_c)
             headers = [
                 "Row(0-idx)"] + [f"C{c}({get_column_letter(c)})" for c in range(1, max_c + 1)]
             rows_str = []
+
             for r_idx in range(max_r):
                 row_vals = data[r_idx][:max_c]
                 if any(v is not None for v in row_vals):
@@ -171,9 +214,10 @@ class ExcelWorkspace:
             if rows_str:
                 out.append(pd.DataFrame(
                     rows_str, columns=headers).to_markdown(index=False))
-                if total_r > max_preview_rows:
+                if total_r > max_r:
                     out.append(
-                        f"... (Còn {total_r - max_preview_rows} dòng bên dưới. Dùng run_python_analysis để xử lý toàn bộ)")
+                        f"... (Còn {total_r - max_r} dòng bên dưới. Dùng tool `search_keyword` hoặc `run_python_analysis` để xử lý)")
+
         return "\n".join(out)
 
     def read_grid(self, sheet_name: str = "", start_row: int = 1, end_row: int = 120) -> str:
@@ -199,6 +243,24 @@ class ExcelWorkspace:
             return f"Không có dữ liệu trong dòng {start_row}-{end_row}."
         return pd.DataFrame(rows_str, columns=headers).to_markdown(index=False)
 
+    def search_keyword(self, keyword: str) -> str:
+        """Tìm kiếm từ khóa trên toàn bộ WorkSpace và trả về toạ độ cụ thể."""
+        kw = keyword.lower().strip()
+        results = []
+        for sheet_name, data in self.sheets_raw.items():
+            for r_idx, row in enumerate(data):
+                for c_idx, val in enumerate(row):
+                    if val is not None and kw in str(val).lower():
+                        results.append(
+                            f"- Sheet: '{sheet_name}' | Row: {r_idx} | Col_idx: {c_idx} | Value: '{str(val).strip()}'"
+                        )
+                        if len(results) >= 15:
+                            return "\n".join(results) + "\n... (Nhiều hơn 15 kết quả, vui lòng dùng keyword cụ thể hơn)."
+
+        if not results:
+            return f"Không tìm thấy '{keyword}' trong toàn bộ file."
+        return "\n".join(results)
+
     def load_df(self, sheet_name: Any = None, header_rows: Any = 1) -> pd.DataFrame:
         if sheet_name is None or sheet_name == "":
             target_sheet = next(iter(self.sheets_raw.keys()))
@@ -221,17 +283,36 @@ class ExcelWorkspace:
             raw_df.columns = list(range(raw_df.shape[1]))
             return raw_df
 
-        if header_rows == 1 and len(raw_df) >= 2:
-            r0 = [str(x).strip() for x in raw_df.iloc[0].tolist()
-                  if pd.notna(x) and str(x).strip() != ""]
-            r1 = [str(x).strip() for x in raw_df.iloc[1].tolist()
-                  if pd.notna(x) and str(x).strip() != ""]
-            if len(r0) != len(set(r0)) and all(not x.replace(".", "", 1).lstrip("-").isdigit() for x in r1):
-                header_rows = [0, 1]
+        # TÌM DÒNG HEADER THỰC SỰ: Dòng đầu tiên có nhiều hơn 2 giá trị khác rỗng
+        first_valid_row_idx = 0
+        for idx in range(min(5, len(raw_df))):
+            valid_count = raw_df.iloc[idx].count()
+            if valid_count >= 2:  # Khả năng cao là Header
+                first_valid_row_idx = idx
+                break
 
-        h_indices = list(range(header_rows)) if isinstance(
-            header_rows, int) else list(header_rows)
-        max_h = max(h_indices)
+        # TẠO DANH SÁCH CÁC DÒNG LÀM HEADER (h_indices)
+        if header_rows == 1 and len(raw_df) > first_valid_row_idx + 1:
+            r0 = [str(x).strip() for x in raw_df.iloc[first_valid_row_idx].tolist(
+            ) if pd.notna(x) and str(x).strip() != ""]
+            r1 = [str(x).strip() for x in raw_df.iloc[first_valid_row_idx +
+                                                      1].tolist() if pd.notna(x) and str(x).strip() != ""]
+            # Tự động nhận diện header 2 tầng
+            if len(r0) != len(set(r0)) and all(not x.replace(".", "", 1).lstrip("-").isdigit() for x in r1):
+                h_indices = [first_valid_row_idx, first_valid_row_idx + 1]
+            else:
+                h_indices = [first_valid_row_idx]
+
+        elif isinstance(header_rows, int):
+            # Nếu truyền vào 1 số cụ thể (VD: 2), lấy từ first_valid_row_idx tiến xuống
+            h_indices = list(
+                range(first_valid_row_idx, first_valid_row_idx + header_rows))
+
+        else:
+            # Nếu truyền vào list cụ thể (VD: [2, 3])
+            h_indices = list(header_rows)
+
+        max_h = max(h_indices) if h_indices else -1
         if max_h >= len(raw_df):
             return raw_df
 
@@ -268,12 +349,31 @@ class ExcelWorkspace:
         buf = io.StringIO()
 
         # --- Các hàm trợ thủ an toàn (Helper Functions) ---
+        def helper_extract_table(df, keyword_in_header):
+            kw = str(keyword_in_header).lower().strip()
+            for idx, row in df.iterrows():
+                if any(kw in str(val).lower() for val in row.values if pd.notna(val)):
+                    new_df = df.iloc[idx+1:].copy()
+                    new_df.columns = [str(x).replace(
+                        '\n', ' ').strip() for x in row.values]
+                    new_df.reset_index(drop=True, inplace=True)
+                    return new_df
+            return df
+
         def helper_find_row(df, keyword):
             kw = str(keyword).lower().strip()
             for idx, row in df.iterrows():
                 if any(kw in str(val).lower() for val in row.values if pd.notna(val)):
                     return idx
             return -1
+
+        def helper_find_cells(df, keyword):
+            kw = str(keyword).lower().strip()
+            results = []
+            for idx, row in df.iterrows():
+                if any(kw in str(val).lower() for val in row.values if pd.notna(val)):
+                    results.append(idx)
+            return results
 
         def helper_find_col(df, keyword):
             kw = str(keyword).lower().strip()
@@ -289,6 +389,44 @@ class ExcelWorkspace:
                 return df.loc[row_idx, col]
             except Exception:
                 return None
+
+        def helper_clean_num(val):
+            """Gọt sạch $, %, phẩy ngàn, và xử lý dấu gạch ngang '-' thành 0.0"""
+            try:
+                if pd.isna(val):
+                    return 0.0
+                clean = str(val).replace(',', '').replace(
+                    '$', '').replace('%', '').strip()
+                # Thường file thống kê dùng '-' hoặc 'N/A' để chỉ số 0 hoặc không có dữ liệu
+                if clean in ['-', 'N/A', 'NA', '']:
+                    return 0.0
+                return float(clean)
+            except:
+                return 0.0
+
+        def helper_clean_col(df, col_identifier):
+            """Trả về một Pandas Series chứa các số thực đã được làm sạch an toàn từ cột chỉ định"""
+            try:
+                if isinstance(col_identifier, int):
+                    col_name = df.columns[col_identifier]
+                else:
+                    col_name = col_identifier
+                return df[col_name].apply(helper_clean_num)
+            except Exception:
+                return pd.Series(dtype=float)
+
+        def helper_parse_date(df, col_identifier):
+            """Ép kiểu cột chuỗi ngày tháng sang datetime an toàn để trừ tuổi"""
+            try:
+                if isinstance(col_identifier, int):
+                    col_name = df.columns[col_identifier]
+                else:
+                    col_name = col_identifier
+                # Coerce để những ô lỗi ngày tháng tự động biến thành NaT
+                return pd.to_datetime(df[col_name], errors='coerce')
+            except Exception:
+                return df[col_identifier] if not isinstance(col_identifier, int) else df.iloc[:, col_identifier]
+
         # --------------------------------------------------
 
         exec_globals = {
@@ -300,9 +438,14 @@ class ExcelWorkspace:
             "sheets_raw": self.sheets_raw,
             "load_df": self.load_df,
             "load_unmerged_df": self.load_df,
+            "extract_table": helper_extract_table,
             "find_row": helper_find_row,
+            "find_cells": helper_find_cells,
             "find_col": helper_find_col,
             "get_val": helper_get_val,
+            "clean_num": helper_clean_num,
+            "clean_col": helper_clean_col,
+            "parse_date": helper_parse_date,
         }
 
         try:
@@ -310,9 +453,20 @@ class ExcelWorkspace:
                 exec(code, exec_globals)
             output = buf.getvalue()
             return output if output.strip() else "(Code chạy thành công nhưng chưa có lệnh print(). Hãy dùng print() để in kết quả!)"
-        except Exception:
+        except Exception as e:
             tb_lines = traceback.format_exc().strip().splitlines()
-            return "Lỗi khi thực thi Python code:\n" + "\n".join(tb_lines[-6:])
+            error_msg = "Lỗi khi thực thi Python code:\n" + \
+                "\n".join(tb_lines[-6:])
+
+            # Ý TƯỞNG MỚI: Bơm "thuốc giải" trực tiếp vào thông báo lỗi để AI tỉnh ngộ!
+            if isinstance(e, KeyError):
+                error_msg += "\n[HINT]: Lỗi KeyError! Tên cột bạn dùng không tồn tại. Đừng cố đoán tên cột. Hãy in df.columns.tolist() ra để xem tên chính xác, HOẶC dùng extract_table(df, 'từ_khóa') để cắt lại bảng."
+            elif isinstance(e, ValueError):
+                error_msg += "\n[HINT]: Lỗi ValueError! Có thể bạn đang tính toán toán học trên chuỗi chứa '$', '%', ','. BẮT BUỘC dùng clean_col(df, 'tên_cột') trước khi dùng .sum() hoặc .mean()."
+            elif isinstance(e, IndexError):
+                error_msg += "\n[HINT]: Lỗi IndexError! Tọa độ dòng/cột bạn trích xuất nằm ngoài phạm vi bảng."
+
+            return error_msg
 
 
 # ---------------------------------------------------------------------------
@@ -416,27 +570,36 @@ def normalize_final_answer(query: str, raw_text: str) -> str:
         ]
     )
 
-    # 3. Xử lý câu trả lời có dấu phẩy ngăn cách nhiều giá trị (ví dụ: `40.60, 37.60` hoặc `2020, 9743`)
+    # 3. Xử lý câu trả lời có dấu phẩy ngăn cách nhiều giá trị
     if "," in ans and ("separated by a comma" in q_lower or "answer as `" in q_lower):
         parts = [p.strip() for p in ans.split(",")]
-        formatted_parts = []
-        both_decimals = target_decimals is not None and not any(
-            k in q_lower for k in ["group,", "class,", "year,", "sheet name,"]
-        )
-        for idx, p in enumerate(parts):
-            clean_p = p.replace(",", "").replace(
-                "$", "").replace("%", "").strip()
-            try:
-                val = float(clean_p)
-                if target_decimals is not None and (both_decimals or "." in clean_p or idx == len(parts) - 1):
-                    formatted_parts.append(f"{val:.{target_decimals}f}")
-                elif is_integer_req or clean_p.lstrip("-").isdigit():
-                    formatted_parts.append(str(int(round(val))))
-                else:
-                    formatted_parts.append(clean_p)
-            except ValueError:
-                formatted_parts.append(p)
-        return ", ".join(formatted_parts)
+
+        # KIỂM TRA MỚI: Nếu đây là danh sách chữ (ví dụ rank categories), không được ép kiểu
+        is_numeric_list = all(re.fullmatch(
+            r"[-+]?\d*\.?\d+", p.replace("$", "").replace("%", "").strip()) for p in parts if p.strip())
+
+        if is_numeric_list:
+            formatted_parts = []
+            both_decimals = target_decimals is not None and not any(
+                k in q_lower for k in ["group,", "class,", "year,", "sheet name,"]
+            )
+            for idx, p in enumerate(parts):
+                clean_p = p.replace("$", "").replace(
+                    "%", "").strip()  # KHÔNG replace phẩy ở đây nữa
+                try:
+                    val = float(clean_p)
+                    if target_decimals is not None and (both_decimals or "." in clean_p or idx == len(parts) - 1):
+                        formatted_parts.append(f"{val:.{target_decimals}f}")
+                    elif is_integer_req or clean_p.lstrip("-").isdigit():
+                        formatted_parts.append(str(int(round(val))))
+                    else:
+                        formatted_parts.append(clean_p)
+                except ValueError:
+                    formatted_parts.append(p)
+            return ", ".join(formatted_parts)
+        else:
+            # Nếu là mảng chữ, trả về nguyên bản chuỗi ban đầu để Exact Match không bị sai
+            return ans
 
     # 4. Xử lý câu trả lời là một giá trị số đơn lẻ
     clean_single = ans.replace(",", "").replace(
@@ -551,6 +714,8 @@ class QuerySolver:
                             int(t_args.get("start_row", 1)),
                             int(t_args.get("end_row", 120)),
                         )
+                    elif t_name == "search_keyword":
+                        tool_out = ws.search_keyword(t_args.get("keyword", ""))
                     else:
                         tool_out = f"Tool '{t_name}' không tồn tại."
 
