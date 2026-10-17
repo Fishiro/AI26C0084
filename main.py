@@ -32,7 +32,7 @@ QUY TẮC BẮT BUỘC (CHAIN OF THOUGHT):
 2. Nếu bảng nhỏ và bạn đã thấy rõ đáp án chính xác trên bảng xem trước (Overview), hãy xuất ngay <FINAL_ANSWER>.
 3. Nếu cần chạy Python tool, hãy SỬ DỤNG CÁC HÀM TRỢ THỦ SAU đây thay vì tự viết logic pandas phức tạp để tránh lỗi:
    - `df = load_df()`: Lấy DataFrame an toàn (đã tự động gộp header).
-   - `df = extract_table(df, "keyword")`: RẤT QUAN TRỌNG! Nếu DataFrame bị dính các dòng tiêu đề báo cáo dài (title) làm hỏng Header, hãy gọi hàm này với `keyword` là tên của một cột thực sự để cắt bỏ title và thiết lập lại Header chuẩn.
+   - `df = extract_table(df, "keyword")`: TỐI QUAN TRỌNG VÀ BẮT BUỘC! File thống kê luôn có 3-4 dòng title rác trên cùng. Ngay dòng code đầu tiên, BẠN PHẢI GỌI `df = extract_table(df, "từ_khóa")` (ví dụ từ khóa là 'Year', 'Occupation', 'Age') để cắt bỏ title rác và gán lại Header. Nếu không làm bước này, code của bạn sẽ bị lỗi KeyError 100%.- `df = extract_table(df, "keyword")`: RẤT QUAN TRỌNG! Nếu DataFrame bị dính các dòng tiêu đề báo cáo dài (title) làm hỏng Header, hãy gọi hàm này với `keyword` là tên của một cột thực sự để cắt bỏ title và thiết lập lại Header chuẩn.
    - `find_row(df, "keyword")`: Trả về Index của dòng ĐẦU TIÊN chứa keyword.
    - `find_cells(df, "keyword")`: Trả về DANH SÁCH TẤT CẢ các Index dòng chứa keyword.
    - `find_col(df, "keyword")`: Trả về tên cột chứa keyword.
