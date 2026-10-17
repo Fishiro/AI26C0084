@@ -108,34 +108,35 @@ Các tham số trên đã tương thích với giao diện CLI được triển 
 
 ## Kiến trúc và phương pháp xử lý
 
-Giải pháp được thiết kế gói gọn trong `main.py`, kết hợp giữa tiền xử lý bảng tính trên RAM, vòng lặp suy luận với công cụ (Tool Calling) và bộ chuẩn hóa đầu ra bằng biểu thức chính quy (Regex).
+Giải pháp được thiết kế gói gọn trong `main.py`, kết hợp giữa tiền xử lý bảng tính trên RAM, hệ thống Agent tự sửa lỗi qua công cụ (Tool Calling), và bộ chuẩn hóa đầu ra bằng biểu thức chính quy (Regex) hỗ trợ Exact Match đa ngôn ngữ.
 
-### 1. ExcelWorkspace - Tiền xử lý và lưu đệm bảng tính trên RAM
+### 1. ExcelWorkspace - Tiền xử lý thông minh và Tối ưu Token động
 
-- **Đọc và làm phẳng ô gộp (`merged_cells`):** Sử dụng `openpyxl` (`data_only=True`) để lấy giá trị thực của ô thay vì công thức. Tự động tách toàn bộ các vùng ô gộp và điền lặp lại giá trị của ô gốc (top-left) vào tất cả các ô thành phần nhằm bảo toàn ngữ cảnh dòng/cột.
-- **Tạo bảng xem trước (`get_overview`):** Trích xuất tối đa 35 dòng và 20 cột đầu tiên của mỗi trang tính dưới dạng bảng Markdown có gắn tọa độ dòng (`R1(0)`) và cột (`C1(A)`). Với các bảng dữ liệu nhỏ, mô hình có thể trả lời trực tiếp ngay từ bước xem trước mà không cần gọi thêm công cụ.
-- **Chuẩn hóa DataFrame (`load_df`):** Tự động loại bỏ các dòng/cột trống hoàn toàn, nhận diện và gộp tiêu đề nhiều tầng (`multi-row headers`) thành tên cột hoàn chỉnh (kèm tên cột rút gọn nếu không trùng lặp), đồng thời tự động ép kiểu số (`pd.to_numeric`) cho các cột dữ liệu.
+- **Làm phẳng không gian ô gộp (Unmerge & Context Preservation):** Các tệp thống kê thường lạm dụng ô gộp (`merged_cells`). Hệ thống sử dụng `openpyxl` với `data_only=True` để đọc giá trị thực, sau đó tự động unmerge toàn bộ và điền sao chép giá trị của ô gốc (top-left) vào tất cả các ô thành phần. Điều này giúp Pandas sau này không bị lỗi `NaN` khi truy xuất tọa độ.
+- **Thuật toán "Ngân sách dòng toàn cục" (Global Token Budget):** Không giới hạn cố định số dòng cố định cho hàm `get_overview`. Hệ thống tính toán động dựa trên số lượng sheets: nếu file chỉ có 1 sheet, nó cấp phát tới 50 dòng để mường tượng tối đa; nhưng nếu file có 15 sheets, nó sẽ ép nén mỗi sheet xuống 15 dòng đầu. Đảm bảo Context Window của Prompt luôn an toàn dưới giới hạn Token và tiết kiệm chi phí (`< 0.10$`).
+- **Chuẩn hóa Header & Loại bỏ Title rác (`load_df`):** Tự động bỏ qua các dòng rỗng. Phát hiện dòng Header đích thực bằng cách quét tìm dòng đầu tiên chứa nhiều hơn 2 cột có dữ liệu thực tế. Tránh hoàn toàn việc Pandas lấy nhầm dòng Title báo cáo (VD: _"Báo cáo tài chính quý 3"_) làm tên Header, đồng thời gộp an toàn các tiêu đề đa tầng (MultiIndex) thành chuỗi phẳng.
 
-### 2. QuerySolver - Vòng lặp suy luận và thực thi công cụ
+### 2. QuerySolver - Agent Tự phục hồi và Thực thi an toàn (Self-Healing Agent)
 
-- **Cơ chế bộ nhớ đệm an toàn luồng (Thread-safe Cache):** Lưu giữ tối đa 5 đối tượng `ExcelWorkspace` gần nhất trên RAM và đồng bộ hóa truy cập bằng `threading.Lock`, giúp tái sử dụng dữ liệu khi có nhiều câu hỏi cùng truy vấn trên một tệp Excel.
-- **Vòng lặp Agent (tối đa 6 bước):** Kết nối với mô hình ngôn ngữ (mặc định `qwen/qwen3.7-flash`) qua OpenRouter API với `temperature=0.0`. Mô hình suy luận từng bước trong thẻ `<THOUGHT>` và chủ động lựa chọn gọi công cụ trước khi đưa ra đáp án trong thẻ `<FINAL_ANSWER>`.
-- **Hệ thống công cụ và hàm trợ thủ an toàn:**
-    - `read_sheet_grid`: Đọc chi tiết một vùng dòng/cột cụ thể trên sheet khi bảng vượt quá phạm vi xem trước.
-    - `run_python_analysis`: Thực thi mã Python/Pandas trực tiếp trên dữ liệu trong bộ nhớ và thu nhận kết quả qua `stdout`. Cung cấp sẵn các hàm trợ thủ (`load_df`, `find_row`, `find_col`, `get_val`) giúp tìm kiếm dòng/cột theo từ khóa không phân biệt hoa thường, hạn chế lỗi sai lệch tên cột do ký tự ẩn hoặc tiêu đề gộp quá dài.
-- **Quy tắc suy luận miền dữ liệu (Domain Rules):** Tích hợp chỉ dẫn trực tiếp trong System Prompt để xử lý các trường hợp dễ mất điểm Exact Match như: giữ nguyên cột `Total` khi đề bài yêu cầu tính trên toàn bộ các nhóm (`across all...`), tính tuổi dựa trên khoảng cách giữa `Date of Admission` và `Date of Birth`, và giữ nguyên giá trị số gốc trên ô mà không tự ý nhân theo đơn vị ghi chú (`[In thousands]`, `[In millions]`).
+- **Cơ chế Cache luồng an toàn (Thread-safe Lock):** Cache tối đa 5 đối tượng `ExcelWorkspace` gần nhất trên RAM. Sử dụng `threading.Lock` để cho phép các câu hỏi song song truy cập cùng 1 file Excel mà không bị lỗi xung đột biến nhớ hay phải đọc lại file từ ổ cứng nhiều lần.
+- **Vòng lặp Agent 6 bước & Tool Calling tự phục hồi:** Kết nối qua OpenRouter (`qwen/qwen3.7-flash`, `temperature=0.0`). Đặc biệt, hàm `run_python_analysis` tích hợp cơ chế **Auto-correction hint** trực tiếp vào Traceback. Ví dụ: nếu LLM dùng sai tên cột sinh ra `KeyError`, hệ thống không chỉ báo lỗi mà còn gợi ý ngay trong Console: _"[HINT]: Lỗi KeyError! Đừng cố đoán tên cột, hãy in df.columns.tolist() ra..."_. Mô hình sẽ tự học và sửa code đúng ở vòng lặp sau.
+- **Bộ Công cụ & Helper Vượt Ải (Domain Tools):**
+    - `extract_table`: Vũ khí hạng nặng xử lý các file quá dị biệt. Tự động cắt phăng toàn bộ các dòng title dư thừa phía trên và lấy đúng dòng chứa `keyword` làm Header mới.
+    - `search_keyword`: Tầm soát toàn file. Báo cáo chính xác (Sheet, Dòng, Cột) khi dữ liệu nằm lọt thỏm giữa 15 sheet hoặc hàng ngàn dòng mà Overview không thể thấy.
+    - `clean_num` & `clean_col`: Hóa giải mọi bẫy ký tự ẩn của BTC (xóa `$`, `%`, `,`) và biến đổi các chuỗi rỗng/vô định (như -, `N/A`) thành số `0.0` an toàn trước khi dùng phép toán `.sum()` hay `.mean()`.
+    - `parse_date`: Ép kiểu dữ liệu chuỗi `dd/mm/yyyy` về chuẩn Datetime Pandas, khắc phục triệt để lỗi `TypeError` khi BTC yêu cầu trừ ngày tháng (VD: tính tuổi dựa trên `Date of Admission`).
 
-### 3. Chuẩn hóa kết quả đa ngôn ngữ (`normalize_final_answer`)
+### 3. Chuẩn hóa kết quả Khắc nghiệt (Exact Match Normalization)
 
-- **Làm sạch chuỗi kết quả:** Trích xuất nội dung từ thẻ `<FINAL_ANSWER>` (hoặc dòng kết quả cuối cùng), loại bỏ các tiền tố giải thích thừa (`Answer:`, `Đáp án:`, `Réponse:`,...), dấu ngoặc kép và dấu chấm câu ở cuối.
-- **Định dạng số học đa ngôn ngữ (`detect_decimals`):** Sử dụng Regex để nhận diện yêu cầu về số chữ số thập phân hoặc số nguyên bằng nhiều ngôn ngữ (Anh, Việt, Pháp, Đức, Tây Ban Nha, Bồ Đào Nha, Trung, Hàn), đảm bảo làm tròn chuẩn xác và giữ nguyên các chữ số `0` ở phần thập phân (ví dụ: `14.20`).
-- **Xử lý các định dạng câu trả lời đặc thù:** Tự động chuẩn hóa câu hỏi dạng `Yes/No`, định dạng từng phần tử trong câu trả lời chứa nhiều giá trị ngăn cách bằng dấu phẩy, và lọc bỏ ký hiệu tiền tệ/phần trăm (`$`, `%`, `,`) khi chuẩn hóa giá trị số.
+- **Gọt dũa tiền tố/hậu tố:** Quét `Regex` sâu để bóc tách đáp án khỏi thẻ `<FINAL_ANSWER>`. Lọc sạch các từ dẫn dắt thừa (như `Answer:`, `Kết quả:`), loại bỏ dấu ngoặc kép thừa và dấu chấm câu ở cuối chuỗi.
+- **Bảo toàn định dạng Thập phân đa ngôn ngữ (`detect_decimals`):** Dùng Regex quét câu hỏi (hỗ trợ Anh, Việt, Pháp, Đức, Trung, Hàn, Tây Ban Nha) để bắt yêu cầu về định dạng (VD: _"two decimal places"_). Ép kiểu và bảo toàn số `0` ở phần thập phân (VD: `14.20`) hoặc làm tròn nguyên số.
+- **Chống sai lệch do Phép toán mảng (Numeric Array Fallback):** Khi đáp án trả về là một mảng xếp hạng tên chữ có chứa dấu phẩy (VD: _"Food, Energy, Services"_), hệ thống tự động nhận diện mảng String để không can thiệp biến dạng chuỗi. Nhưng nếu là mảng số (_"2020, 9034"_), hệ thống tự bóc tách, dọn dẹp `$ / %` và làm tròn số học trên từng phần tử.
 
-### 4. Xử lý song song, theo dõi chi phí và xuất kết quả
+### 4. Tối ưu chi phí và Quản lý đa luồng
 
-- **Thực thi đa luồng (`ThreadPoolExecutor`):** Chạy song song tối đa 3 luồng (`max_workers=3`) để tối ưu hóa thời gian chờ mạng khi gọi API mà vẫn kiểm soát tốt dung lượng RAM tiêu thụ.
-- **Gom log và thống kê chi phí:** Mỗi câu hỏi được gom toàn bộ lịch sử xử lý vào bộ đệm riêng (`logs_buffer`) và in tuần tự qua khóa `print_lock` để tránh trộn lẫn log giữa các luồng, kèm theo thống kê chi tiết số lượng token và chi phí ước tính.
-- **Đầu ra tiêu chuẩn và dự phòng:** Sắp xếp danh sách kết quả theo `id` tăng dần, xuất ra tệp `submission.csv` gồm 2 cột `id,answer` theo đúng quy định và tự động lưu thêm tệp `answers.json` cùng thư mục để đối chiếu khi cần.
+- **Thực thi Đa luồng (`ThreadPoolExecutor`):** Chạy song song `max_workers=3`. Giúp tận dụng tối đa 6 vCPU để đánh bại thời gian trễ của API mạng, nhưng vẫn nằm an toàn dưới ngưỡng tràn RAM của BTC.
+- **Quản lý Console Log bất đồng bộ:** Áp dụng mô hình "Gom log cục bộ" (`logs_buffer`) và khóa đồng bộ hóa in ấn (`print_lock`), giúp các đoạn log chi tiết (THOUGHT, CALL, OUTPUT, COST) của từng câu hỏi không bị trộn lẫn nát bét trên màn hình Terminal.
+- **Xuất File & Đo lường chi phí:** Đáp ứng tuyệt đối cấu trúc nộp bài bằng cách lưu mảng cuối cùng (đã sort theo `id`) ra tệp `submission.csv` (2 cột: id, answer). Đồng thời ghi toàn bộ siêu dữ liệu vòng đời (Cost, Tokens, Log lỗi) vào tệp `answers.json` nội bộ để dễ dàng audit chi phí thực tế.
 
 ---
 
